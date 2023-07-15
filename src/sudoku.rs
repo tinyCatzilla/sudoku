@@ -155,7 +155,7 @@ impl Sudoku {
         
         // Finally, we ensure that for every unit of the cell, the digit has at least one place it can be
         for unit in self.units[cell].iter() {
-            let d_places: Vec<_> = unit.iter().filter(|&&s| self.candidates[s].contains(&digit)).cloned().collect();
+            let d_places: Vec<_> = unit.iter().filter(|&&s| self.candidates[&s].contains(&digit)).cloned().collect();
             // If not, we return false to signal a contradiction
             if d_places.is_empty() {
                 return false;
@@ -378,9 +378,9 @@ impl RuleBasedSolver {
         // Returns true if a rule could be applied, false otherwise
         // When any rule succeeds, call the solver again
 
-        if self.naked_single(board) {
-            return true;
-        }
+        // if self.naked_single(board) {
+        //     return true;
+        // }
         if self.hidden_single(board) {
             return true;
         }
@@ -491,7 +491,7 @@ impl RuleBasedSolver {
         for unit in board.units.values() {
             for digit1 in 1..9 {
                 for digit2 in (digit1+1)..10 {
-                    let cells_with_digits: Vec<_> = unit.iter().filter(|&&cell| board.candidates[cell].contains(&digit1) || board.candidates[cell].contains(&digit2)).cloned().collect();
+                    let cells_with_digits: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit1) || board.candidates[&cell].contains(&digit2)).cloned().collect();
                     if cells_with_digits.len() == 2 {
                         for &cell in &cells_with_digits {
                             let other_digits: Vec<_> = (1..10).filter(|&d| d != digit1 && d != digit2).collect();
@@ -549,7 +549,7 @@ impl RuleBasedSolver {
     fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
         for row in 0..9 {
             for digit in 1..=9 {
-                let candidate_cells: Vec<_> = (0..9).filter(|&col| board.candidates[(row, col)].contains(&digit)).map(|col| (row, col)).collect();
+                let candidate_cells: Vec<_> = (0..9).filter(|&col| board.candidates[&(row, col)].contains(&digit)).map(|col| (row, col)).collect();
                 if candidate_cells.is_empty() {
                     continue;
                 }
@@ -570,7 +570,7 @@ impl RuleBasedSolver {
 
         for col in 0..9 {
             for digit in 1..=9 {
-                let candidate_cells: Vec<_> = (0..9).filter(|&row| board.candidates[(row, col)].contains(&digit)).map(|row| (row, col)).collect();
+                let candidate_cells: Vec<_> = (0..9).filter(|&row| board.candidates[&(row, col)].contains(&digit)).map(|row| (row, col)).collect();
                 if candidate_cells.is_empty() {
                     continue;
                 }
@@ -596,19 +596,19 @@ impl RuleBasedSolver {
     fn x_wing(&self, board: &mut Sudoku) -> bool {
         for digit in 1..=9 {
             for i in 0..9 {
-                let i_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[(i, col)].contains(&digit)).collect();
+                let i_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[&(i, col)].contains(&digit)).collect();
                 if i_candidate_cols.len() != 2 {
                     continue;
                 }
 
                 for j in i + 1..9 {
-                    let j_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[(j, col)].contains(&digit)).collect();
+                    let j_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[&(j, col)].contains(&digit)).collect();
 
                     if j_candidate_cols == i_candidate_cols {
                         for &col in &i_candidate_cols {
                             for row in 0..9 {
                                 let cell = (row, col);
-                                if row != i && row != j && board.candidates[cell].contains(&digit) {
+                                if row != i && row != j && board.candidates[&cell].contains(&digit) {
                                     board.eliminate(cell, digit);
                                     return true;
                                 }
@@ -674,7 +674,7 @@ impl Stochastic {
     // Swap two cells randomly within the same unit
     fn swap_random(&self, board: &mut Sudoku) {
         let unit_index = rand::thread_rng().gen_range(0..board.units.len());
-        let unit = &board.units[unit_index];
+        let unit = &board.units[&unit_index];
         let mut rng = rand::thread_rng();
         let (i, j) = (rng.gen_range(0..unit.len()), rng.gen_range(0..unit.len()));
         let temp = board.board[unit[i].0][unit[i].1];
