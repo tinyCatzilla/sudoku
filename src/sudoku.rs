@@ -1,6 +1,8 @@
-// Basic structure of a sudoku board
 use std::collections::{HashMap, HashSet};
+use rand::Rng;
+mod utils;
 
+// Basic structure of a sudoku board
 pub struct Sudoku {
     board: [[u8; 9]; 9],
     units: HashMap<String, Vec<Vec<String>>>,
@@ -19,22 +21,22 @@ impl Sudoku {
     fn new() -> Self {
         let rows = "ABCDEFGHI".chars().collect::<Vec<_>>();
         let cols = (1..=9).map(|i| i.to_string()).collect::<Vec<_>>();
-        let squares = cross(&rows, &cols);
+        let squares = utils::cross(&rows, &cols);
 
         let unitlist = {
             let mut unitlist = Vec::new();
             // Rows
             for c in &cols {
-                unitlist.push(cross(&rows, &[*c]));
+                unitlist.push(utils::cross(&rows, &[*c]));
             }
             // Columns
             for r in &rows {
-                unitlist.push(cross(&[*r], &cols));
+                unitlist.push(utils::cross(&[*r], &cols));
             }
             // Boxes
             for rs in vec![&rows[0..3], &rows[3..6], &rows[6..9]] {
                 for cs in vec![&cols[0..3], &cols[3..6], &cols[6..9]] {
-                    unitlist.push(cross(rs, cs));
+                    unitlist.push(utils::cross(rs, cs));
                 }
             }
             return unitlist;
@@ -105,6 +107,7 @@ impl Sudoku {
         true
     }
 
+
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
         // If the digit is not a candidate, we do nothing and return true
         if !self.candidates[cell].contains(&digit) {
@@ -158,18 +161,11 @@ impl Sudoku {
         }
         return true;
     }
-}
 
-fn cross<A: Clone, B: Clone>(a: &[A], b: &[B]) -> Vec<String> {
-    let mut result = Vec::new();
-
-    for a in a {
-        for b in b {
-            result.push(format!("{}{}", a, b));
-        }
+    fn unique_elements(arr: [u8; 9]) -> i32 {
+        let unique_set: std::collections::HashSet<_> = arr.iter().filter(|&&x| x != 0).collect();
+        unique_set.len() as i32
     }
-
-    return result;
 }
 
 pub trait Solver {
@@ -191,22 +187,21 @@ impl Solver for BruteForceSolver {
                     let candidates = board.candidates.get(&cell).unwrap().clone();
                     for num in candidates {
                         if board.is_valid(row, col, num) {
-                            board.assign(&cell, num);
+                            board.board[row][col] = num; // directly assign num to the cell
                             if self.solve(board) {
                                 return true;
                             } else {
-                                board.unassign(&cell, num);
+                                board.board[row][col] = 0; // directly unassign the cell
                             }
                         }
                     }
-                    return false;
+                    return false; // backtrack if no candidate number leads to a solution
                 }
             }
         }
         true
     }
 }
-
 
 pub struct RuleBasedSolver;
 // Rule-based solver.
@@ -277,11 +272,14 @@ impl Solver for RuleBasedSolver {
     }
 
     fn solved(&self, board: &Sudoku) -> bool {
-        // Check if the board is solved
+        // Check if the board is solved by verifying that every cell has exactly one candidate
         for row in 0..9 {
             for col in 0..9 {
-                if board.board[row][col] == 0 {
-                    return false;
+                let cell = Cell { row, col };
+                if let Some(candidates) = board.candidates.get(&cell) {
+                    if candidates.len() != 1 {
+                        return false;
+                    }
                 }
             }
         }
@@ -508,9 +506,98 @@ impl RuleBasedSolver {
 }
 
 // Crook's algorithm.
+// A little tough :( sadge
 
+    
 // Stochastic search.
 
-// Constraint programming.
+pub struct Stochastic {
+    temperature: f64,
+    cooling_factor: f64,
+}
+
+// Uses stochastic search with simulated annealing.
+// https://en.wikipedia.org/wiki/Simulated_annealing
+impl Stochastic {
+    pub fn new(temperature: f64, cooling_factor: f64) -> Self {
+        Stochastic { 
+            temperature, 
+            cooling_factor,
+        }
+    }
+
+    // Swap two cells randomly within the same unit
+    fn swap_random(&self, board: &mut Sudoku) {
+        let unit_index = rand::thread_rng().gen_range(0..board.units.len());
+        let unit = &board.units[unit_index];
+        let mut rng = rand::thread_rng();
+        let (i, j) = (rng.gen_range(0..unit.len()), rng.gen_range(0..unit.len()));
+        let temp = board.board[unit[i].0][unit[i].1];
+        board.board[unit[i].0][unit[i].1] = board.board[unit[j].0][unit[j].1];
+        board.board[unit[j].0][unit[j].1] = temp;
+    }
+
+    // Define the error function
+    fn score(&self, board: &Sudoku) -> i32 {
+        let mut score = 0;
+        for i in 0..9 {
+            let row = board.board[i];
+            let column: Vec<u8> = (0..9).map(|j| board.board[j][i]).collect();
+            score -= Sudoku::unique_elements(row) + Sudoku::unique_elements(column);
+        }
+        score
+    }
+
+    // Implement the annealing schedule
+    fn cool_down(&mut self) {
+        self.temperature *= self.cooling_factor;
+    }
+
+    // Check if we should accept the new state
+    fn accept(&self, delta_s: i32) -> bool {
+        if delta_s >= 0 {
+            true
+        } else {
+            let u: f64 = rand::thread_rng().gen();
+            (delta_s as f64 / self.temperature).exp() > u
+        }
+    }
+}
+
+impl Solver for Stochastic {
+    fn solve(&mut self, board: &mut Sudoku) -> bool {
+        let mut score = self.score(board);
+        while score > -162 {
+            // Store the current board and score
+            let old_board = board.clone();
+            let old_score = score;
+
+            // Make a random move
+            self.swap_random(board);
+            
+            // Evaluate the new score
+            score = self.score(board);
+            
+            // Decide whether to keep the new state
+            if !self.accept(score - old_score) {
+                // Restore the old board and score
+                *board = old_board;
+                score = old_score;
+            }
+
+            // Cool down the system
+            self.cool_down();
+        }
+        score == -162
+    }
+}
+
+// Constraint programming with forward propagation and backtracking.
+
+pub struct CSPSolver {
+    // Store eliminated values for each cell to allow for backtracking
+    assignments: HashMap<Cell, HashSet<usize>>,
+}
+
 
 // Knuth's Algorithm X, with dancing links.
