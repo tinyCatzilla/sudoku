@@ -162,6 +162,7 @@ impl Sudoku {
         return true;
     }
 
+    // Check the unique elements in a given array
     fn unique_elements(arr: [u8; 9]) -> i32 {
         let unique_set: std::collections::HashSet<_> = arr.iter().filter(|&&x| x != 0).collect();
         unique_set.len() as i32
@@ -200,6 +201,76 @@ impl Solver for BruteForceSolver {
             }
         }
         true
+    }
+}
+
+// Constraint programming with forward propagation and backtracking.
+
+pub struct CSPSolver {
+    // Store eliminated values for each cell to allow for backtracking
+    assignments: HashMap<Cell, HashSet<usize>>,
+}
+
+impl CSPSolver {
+    // Constructor for CSPSolver
+    pub fn new() -> Self {
+        Self {
+            assignments: HashMap::new(),
+        }
+    }
+
+    // Function to find the first unassigned variable
+    fn select_unassigned_variable(&self, board: &Sudoku) -> Cell {
+        for row in 0..9 {
+            for col in 0..9 {
+                let cell = Cell { row, col };
+                if board.board[row][col] == 0 {
+                    return cell;
+                }
+            }
+        }
+        panic!("No unassigned variable found");
+    }
+
+    // Function to unassign a variable
+    fn unassign(&mut self, board: &mut Sudoku, cell: &Cell, digit: usize) {
+        // Remove digit from the assignments of the cell
+        self.assignments.get_mut(cell).unwrap().remove(&digit);
+
+        // Add digit back to the candidates of the cell
+        board.candidates.get_mut(cell).unwrap().insert(digit);
+    }
+}
+
+
+impl Solver for CSPSolver {
+    fn solve(&mut self, board: &mut Sudoku) -> bool {
+        // If all variables are assigned, check if the solution is consistent
+        if board.is_complete() {
+            return board.is_valid();
+        }
+
+        // Get the next variable V to assign
+        let cell = self.select_unassigned_variable(board);
+
+        // Iterate over the domain of V
+        for digit in board.candidates[&cell].iter() {
+            if board.is_valid_assignment(&cell, *digit) {
+                // Assign the value to V
+                board.assign(&cell, *digit);
+                self.assignments.get_mut(&cell).unwrap().insert(*digit);
+
+                // Recursively call solve to continue to the next variable
+                if self.solve(board) {
+                    return true;
+                }
+
+                // Unassign the value from V (backtracking step)
+                self.unassign(board, &cell, *digit);
+            }
+        }
+
+        return false;
     }
 }
 
@@ -591,13 +662,5 @@ impl Solver for Stochastic {
         score == -162
     }
 }
-
-// Constraint programming with forward propagation and backtracking.
-
-pub struct CSPSolver {
-    // Store eliminated values for each cell to allow for backtracking
-    assignments: HashMap<Cell, HashSet<usize>>,
-}
-
 
 // Knuth's Algorithm X, with dancing links.
