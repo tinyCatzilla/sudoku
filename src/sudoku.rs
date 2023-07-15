@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::collections::LinkedList;
+use std::cell::RefCell;
+use std::rc::Rc;
 use rand::Rng;
-mod utils;
+use core::cell::Cell;
+use crate::utils;
 
 // Basic structure of a sudoku board
 pub struct Sudoku {
@@ -8,16 +12,16 @@ pub struct Sudoku {
     units: HashMap<String, Vec<Vec<String>>>,
     peers: HashMap<String, HashSet<String>>,
     candidates: HashMap<String, HashSet<usize>>,
-    //  priority queue of cells ordered by the number of candidates.
+    // TODO? priority queue of cells ordered by the number of candidates.
 }
 
 impl Sudoku {
     // Instantiate
     // squares: A list of strings representing the 81 cells of the Sudoku puzzle.
     // unitlist: A list of lists, where each sub-list is a "unit" that consists of the indices of 9 cells.
-    // units: A dictionary that maps each cell to the list of 3 units that the cell belongs to.
-    // peers: A dictionary that maps each cell to the set of its 20 peers.
-    // candidates: A dictionary that maps each cell to the set of its possible values.
+    // units: A hashmap that maps each cell to the list of 3 units that the cell belongs to.
+    // peers: A hashmap that maps each cell to the set of its 20 peers (cells sharing a unit).
+    // candidates: A hashmap that maps each cell to the set of its possible values.
     fn new() -> Self {
         let rows = "ABCDEFGHI".chars().collect::<Vec<_>>();
         let cols = (1..=9).map(|i| i.to_string()).collect::<Vec<_>>();
@@ -39,7 +43,6 @@ impl Sudoku {
                     unitlist.push(utils::cross(rs, cs));
                 }
             }
-            return unitlist;
         };
 
         let units = squares.iter().map(|s| {
@@ -69,9 +72,30 @@ impl Sudoku {
         }
     }
 
-    // Import sudoku board from a 2D array
-    fn import_sudoku(&mut self, board: [[u8; 9]; 9]) {
-        self.board = board;
+    // Creates a new Sudoku puzzle from a string.
+    pub fn from_string(&self, s: &str){
+        if s.len() != 81 {
+            return Err("Input string must be 81 characters long.");
+        }
+
+        let mut grid: [[u8; 9]; 9] = [[0; 9]; 9]; // Initialise an empty 2D array
+
+        for row in 0..9 {
+            for col in 0..9 {
+                let c = s.chars().nth(9*row + col).unwrap();
+                let value = if c == '.' {
+                    0
+                } else {
+                    c.to_digit(10).ok_or("Each character must be a digit from 0 to 9 or a dot.")?
+                };
+                if value > 9 {
+                    return Err("Each digit must be from 0 to 9.");
+                }
+                grid[row][col] = value;
+            }
+        }
+
+        self.board = grid;
         self.initialize_candidates();
     }
 
@@ -85,7 +109,7 @@ impl Sudoku {
                     self.candidates.insert(cell, (1..=9).collect());
                 } else {
                     // If cell has a value, assign it
-                    if !self.assign(&cell, self.board[row][col]) {
+                    if !self.assign(&cell, self.board[row][col].into()) {
                         panic!("Contradiction found during initialization");
                     }
                 }
@@ -124,7 +148,7 @@ impl Sudoku {
         else if self.candidates[cell].len() == 1 {
             let d2 = *self.candidates[cell].iter().next().unwrap();
             // If elimination from any peer results in a contradiction, we return false
-            if !self.peers[cell].iter().all(|&s2| self.eliminate(s2, d2)) {
+            if !self.peers[cell].iter().all(|&s2| self.eliminate(&s2, d2)) {
                 return false;
             }
         }
@@ -138,7 +162,7 @@ impl Sudoku {
             } 
             // If there is only one such place, we assign the digit there
             else if d_places.len() == 1 {
-                if !self.assign(d_places[0], digit) {
+                if !self.assign(&d_places[0], digit) {
                     return false;
                 }
             }
@@ -166,6 +190,44 @@ impl Sudoku {
     fn unique_elements(arr: [u8; 9]) -> i32 {
         let unique_set: std::collections::HashSet<_> = arr.iter().filter(|&&x| x != 0).collect();
         unique_set.len() as i32
+    }
+
+    // Check if the board is solved
+    pub fn is_solved(&self) -> bool {
+        for i in 0..9 {
+            let mut row = [false; 9];
+            let mut col = [false; 9];
+            let mut box_ = [false; 9];
+
+            for j in 0..9 {
+                // check row
+                if self.board[i][j] != 0 {
+                    if row[(self.board[i][j] - 1) as usize] {
+                        return false;
+                    }
+                    row[(self.board[i][j] - 1) as usize] = true;
+                }
+
+                // check column
+                if self.board[j][i] != 0 {
+                    if col[(self.board[j][i] - 1) as usize] {
+                        return false;
+                    }
+                    col[(self.board[j][i] - 1) as usize] = true;
+                }
+
+                // check box
+                let box_row = 3*(i/3) + j/3;
+                let box_col = 3*(i%3) + j%3;
+                if self.board[box_row][box_col] != 0 {
+                    if box_[(self.board[box_row][box_col] - 1) as usize] {
+                        return false;
+                    }
+                    box_[(self.board[box_row][box_col] - 1) as usize] = true;
+                }
+            }
+        }
+        true
     }
 }
 
@@ -206,73 +268,74 @@ impl Solver for BruteForceSolver {
 
 // Constraint programming with forward propagation and backtracking.
 
-pub struct CSPSolver {
-    // Store eliminated values for each cell to allow for backtracking
-    assignments: HashMap<Cell, HashSet<usize>>,
-}
+// pub struct CSPSolver<T> {
+//     // Store eliminated values for each cell to allow for backtracking
+//     assignments: HashMap<Cell<T>, HashSet<usize>>,
+// }
 
-impl CSPSolver {
-    // Constructor for CSPSolver
-    pub fn new() -> Self {
-        Self {
-            assignments: HashMap::new(),
-        }
-    }
+// impl CSPSolver {
+//     // Constructor for CSPSolver
+//     pub fn new() -> Self {
+//         Self {
+//             assignments: HashMap::new(),
+//         }
+//     }
 
-    // Function to find the first unassigned variable
-    fn select_unassigned_variable(&self, board: &Sudoku) -> Cell {
-        for row in 0..9 {
-            for col in 0..9 {
-                let cell = Cell { row, col };
-                if board.board[row][col] == 0 {
-                    return cell;
-                }
-            }
-        }
-        panic!("No unassigned variable found");
-    }
+//     // Function to find the first unassigned variable
+//     fn select_unassigned_variable(&self, board: &Sudoku) -> Cell<T> {
+//         for row in 0..9 {
+//             for col in 0..9 {
+//                 let cell = Cell { row, col };
+//                 if board.board[row][col] == 0 {
+//                     return cell;
+//                 }
+//             }
+//         }
+//         panic!("No unassigned variable found");
+//     }
 
-    // Function to unassign a variable
-    fn unassign(&mut self, board: &mut Sudoku, cell: &Cell, digit: usize) {
-        // Remove digit from the assignments of the cell
-        self.assignments.get_mut(cell).unwrap().remove(&digit);
+//     // Function to unassign a variable
+//     fn unassign(&mut self, board: &mut Sudoku, cell: &Cell<T>, digit: usize) {
+//         // Remove digit from the assignments of the cell
+//         self.assignments.get_mut(cell).unwrap().remove(&digit);
 
-        // Add digit back to the candidates of the cell
-        board.candidates.get_mut(cell).unwrap().insert(digit);
-    }
-}
+//         // Add digit back to the candidates of the cell
+//         board.candidates.get_mut(cell).unwrap().insert(digit);
+//     }
+// }
 
 
-impl Solver for CSPSolver {
-    fn solve(&mut self, board: &mut Sudoku) -> bool {
-        // If all variables are assigned, check if the solution is consistent
-        if board.is_complete() {
-            return board.is_valid();
-        }
+// impl Solver for CSPSolver {
+//     fn solve(&mut self, board: &mut Sudoku) -> bool {
+//         // If all variables are assigned, check if the solution is consistent
+//         if board.is_complete() {
+//             return board.is_valid();
+//         }
 
-        // Get the next variable V to assign
-        let cell = self.select_unassigned_variable(board);
+//         // Get the next variable V to assign
+//         let cell = self.select_unassigned_variable(board);
 
-        // Iterate over the domain of V
-        for digit in board.candidates[&cell].iter() {
-            if board.is_valid_assignment(&cell, *digit) {
-                // Assign the value to V
-                board.assign(&cell, *digit);
-                self.assignments.get_mut(&cell).unwrap().insert(*digit);
+//         // Iterate over the domain of V
+//         for digit in board.candidates[&cell].iter() {
+//             if board.is_valid_assignment(&cell, *digit) {
+//                 // Assign the value to V
+//                 board.assign(&cell, *digit);
+//                 self.assignments.get_mut(&cell).unwrap().insert(*digit);
 
-                // Recursively call solve to continue to the next variable
-                if self.solve(board) {
-                    return true;
-                }
+//                 // Recursively call solve to continue to the next variable
+//                 if self.solve(board) {
+//                     return true;
+//                 }
 
-                // Unassign the value from V (backtracking step)
-                self.unassign(board, &cell, *digit);
-            }
-        }
+//                 // Unassign the value from V (backtracking step)
+//                 self.unassign(board, &cell, *digit);
+//             }
+//         }
 
-        return false;
-    }
-}
+//         return false;
+//     }
+// }
+
 
 pub struct RuleBasedSolver;
 // Rule-based solver.
@@ -287,7 +350,17 @@ impl Solver for RuleBasedSolver {
         } else if self.apply_complex_rules(board) {
             return self.solve(board);
         } else {
-            if board.solved() {
+            if self.solved(board) {
+                // Update self.board to be equivalent to the candidate board
+                for row in 0..9 {
+                    for col in 0..9 {
+                        let cell = Cell { row, col };
+                        let candidates = board.candidates.get(&cell).unwrap().clone();
+                        if candidates.len() == 1 {
+                            board.board[row][col] = candidates.iter().next().unwrap().clone();
+                        }
+                    }
+                }
                 return true;
             } else {
                 let mut brute_force_solver = BruteForceSolver;
@@ -295,7 +368,11 @@ impl Solver for RuleBasedSolver {
             }
         }
     }
+}
 
+impl RuleBasedSolver {
+
+    
     fn apply_basic_rules(&self, board: &mut Sudoku) -> bool {
         // Apply basic rules here: Naked Single, Hidden Single, Naked Pair, Hidden Pair
         // Returns true if a rule could be applied, false otherwise
@@ -356,29 +433,26 @@ impl Solver for RuleBasedSolver {
         }
         true
     }
-}
-
-impl RuleBasedSolver {
 
     // Basic rules: Naked Single, Hidden Single, Naked Pair, Hidden Pair
     
-    fn naked_single(&self, board: &mut Sudoku) -> bool {
-        for (cell, candidates) in board.candidates.iter() {
-            if candidates.len() == 1 {
-                let val = *candidates.iter().next().unwrap();
-                if !board.assign(cell, val) {
-                    panic!("Contradiction encountered during naked single");
-                }
-                return true;
-            }
-        }
-        false
-    }
+    // fn naked_single(&self, board: &mut Sudoku) -> bool {
+    //     for (cell, candidates) in board.candidates.iter() {
+    //         if candidates.len() == 1 {
+    //             let val = *candidates.iter().next().unwrap();
+    //             if !board.assign(cell, val) {
+    //                 panic!("Contradiction encountered during naked single");
+    //             }
+    //             return true;
+    //         }
+    //     }
+    //     false
+    // }
 
     fn hidden_single(&self, board: &mut Sudoku) -> bool {
         for unit in board.units.values() {
             for digit in 1..=9 {
-                let digit_occurrences: Vec<_> = unit.iter().filter(|&&cell| board.candidates[cell].contains(&digit)).cloned().collect();
+                let digit_occurrences: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit)).cloned().collect();
                 if digit_occurrences.len() == 1 {
                     if !board.assign(&digit_occurrences[0], digit) {
                         panic!("Contradiction encountered during hidden single");
@@ -396,7 +470,7 @@ impl RuleBasedSolver {
                 for j in (i+1)..9 {
                     let cell1 = unit[i];
                     let cell2 = unit[j];
-                    if board.candidates[cell1] == board.candidates[cell2] && board.candidates[cell1].len() == 2 {
+                    if board.candidates[&cell1] == board.candidates[&cell2] && board.candidates[&cell1].len() == 2 {
                         let other_cells: Vec<_> = unit.iter().filter(|&&c| c != cell1 && c != cell2).cloned().collect();
                         for &digit in &board.candidates[cell1] {
                             for &cell in &other_cells {
@@ -549,21 +623,21 @@ impl RuleBasedSolver {
 
     fn swordfish(&self, board: &mut Sudoku) -> bool {
         for digit in 1..=9 {
-            let rows_with_digit: Vec<_> = (0..9).filter(|&row| (0..9).any(|col| board.candidates[(row, col)].contains(&digit))).collect();
+            let rows_with_digit: Vec<_> = (0..9).filter(|&row| (0..9).any(|col| board.candidates[&(row, col)].contains(&digit))).collect();
 
             if rows_with_digit.len() < 3 {
                 continue;
             }
 
             for combo in rows_with_digit.into_iter().combinations(3) {
-                let candidate_cols: Vec<_> = combo.iter().flat_map(|&row| (0..9).filter(move |&col| board.candidates[(row, col)].contains(&digit))).collect();
+                let candidate_cols: Vec<_> = combo.iter().flat_map(|&row| (0..9).filter(move |&col| board.candidates[&(row, col)].contains(&digit))).collect();
                 let unique_candidate_cols: HashSet<_> = candidate_cols.iter().cloned().collect();
 
                 if unique_candidate_cols.len() == 3 {
                     for &col in &unique_candidate_cols {
                         for row in 0..9 {
                             let cell = (row, col);
-                            if !combo.contains(&row) && board.candidates[cell].contains(&digit) {
+                            if !combo.contains(&row) && board.candidates[&cell].contains(&digit) {
                                 board.eliminate(cell, digit);
                                 return true;
                             }
@@ -664,3 +738,173 @@ impl Solver for Stochastic {
 }
 
 // Knuth's Algorithm X, with dancing links.
+// This definitely won't work right now, or anytime in the future.
+// Due to Rust borrow rules.
+
+// struct Node {
+//     row: usize,
+//     col: usize,
+
+//     // The size of the column this node is in.
+//     size: usize,
+
+//     // Neighboring nodes.
+//     up: Option<Rc<RefCell<Node>>>,
+//     down: Option<Rc<RefCell<Node>>>,
+//     left: Option<Rc<RefCell<Node>>>,
+//     right: Option<Rc<RefCell<Node>>>,
+// }
+
+// impl Node {
+//     fn new(row: usize, col: usize) -> Self {
+//         Node {
+//             row,
+//             col,
+//             up: None,
+//             down: None,
+//             left: None,
+//             right: None,
+//         }
+//     }
+// }
+
+// struct Column {
+//     node: Rc<RefCell<Node>>,
+// }
+
+// impl Column {
+//     fn cover(&mut self) {
+//         self.node.borrow_mut().right.as_ref().unwrap().borrow_mut().left = self.node.borrow().left.clone();
+//         self.node.borrow_mut().left.as_ref().unwrap().borrow_mut().right = self.node.borrow().right.clone();
+
+//         let mut i = self.node.borrow().down.clone();
+//         while let Some(node) = i {
+//             let mut j = node.borrow().right.clone();
+//             while let Some(node_j) = j {
+//                 node_j.borrow_mut().down.as_ref().unwrap().borrow_mut().up = node_j.borrow().up.clone();
+//                 node_j.borrow_mut().up.as_ref().unwrap().borrow_mut().down = node_j.borrow().down.clone();
+//                 node_j.borrow().column.borrow_mut().size -= 1;
+
+//                 j = node_j.borrow().right.clone();
+//             }
+//             i = node.borrow().down.clone();
+//         }
+//     }
+
+//     fn uncover(&mut self) {
+//         let mut i = self.node.borrow().up.clone();
+//         while let Some(node) = i {
+//             let mut j = node.borrow().left.clone();
+//             while let Some(node_j) = j {
+//                 node_j.borrow().column.borrow_mut().size += 1;
+//                 node_j.borrow_mut().down.as_ref().unwrap().borrow_mut().up = node_j.clone();
+//                 node_j.borrow_mut().up.as_ref().unwrap().borrow_mut().down = node_j.clone();
+
+//                 j = node_j.borrow().left.clone();
+//             }
+//             i = node.borrow().up.clone();
+//         }
+
+//         self.node.borrow_mut().right.as_ref().unwrap().borrow_mut().left = self.node.clone();
+//         self.node.borrow_mut().left.as_ref().unwrap().borrow_mut().right = self.node.clone();
+//     }
+// }
+
+// struct DancingLinks {
+//     header: Rc<RefCell<Node>>,
+//     columns: Vec<Column>,
+// }
+
+// impl DancingLinks {
+//     fn new(matrix: &Vec<Vec<bool>>) -> Self {
+//         let header = Rc::new(RefCell::new(Node::new(0, 0)));
+
+//         let mut columns = Vec::new();
+//         for i in 0..matrix[0].len() {
+//             let column_node = Rc::new(RefCell::new(Node::new(0, i)));
+//             column_node.borrow_mut().left = Some(if let Some(last_column) = columns.last() {
+//                 last_column.node.clone()
+//             } else {
+//                 header.clone()
+//             });
+
+//             columns.push(Column { node: column_node.clone() });
+
+//             if let Some(prev_column_node) = column_node.borrow().left {
+//                 prev_column_node.borrow_mut().right = Some(column_node.clone());
+//             }
+//         }
+
+//         // Link the last column to the header and vice versa
+//         columns.last().unwrap().node.borrow_mut().right = Some(header.clone());
+//         header.borrow_mut().left = Some(columns.last().unwrap().node.clone());
+
+//         // Create all row nodes and link them to the corresponding column nodes
+//         for (i, row) in matrix.iter().enumerate() {
+//             let mut last_node_in_row = None;
+//             for (j, &value) in row.iter().enumerate() {
+//                 if value {
+//                     let node = Rc::new(RefCell::new(Node::new(i, j)));
+//                     node.borrow_mut().left = last_node_in_row.clone();
+
+//                     let column = &mut columns[j];
+//                     column.node.borrow_mut().size += 1;
+
+//                     if let Some(last_node) = last_node_in_row {
+//                         last_node.borrow_mut().right = Some(node.clone());
+//                         node.borrow_mut().left = Some(last_node.clone());
+//                     }
+
+//                     node.borrow_mut().up = Some(column.node.clone());
+//                     column.node.borrow_mut().down = Some(node.clone());
+
+//                     last_node_in_row = Some(node);
+//                 }
+//             }
+//         }
+
+//         fn search(&self, k: usize, o: &mut Vec<Rc<RefCell<Node>>>) -> Option<Vec<Rc<RefCell<Node>>>> {
+//             if self.header.borrow().right.as_ref().unwrap().borrow().as_ptr() == self.header.borrow().as_ptr() {
+//                 return Some(o.clone());
+//             } else {
+//                 let mut c = self.header.borrow().right.clone();
+//                 self.cover(c.borrow().column.borrow_mut());
+    
+//                 let mut r = c.borrow().down.clone();
+//                 while let Some(node_r) = r {
+//                     o.push(node_r.clone());
+    
+//                     let mut j = node_r.borrow().right.clone();
+//                     while let Some(node_j) = j {
+//                         self.cover(node_j.borrow().column.borrow_mut());
+    
+//                         j = node_j.borrow().right.clone();
+//                     }
+    
+//                     let result = self.search(k + 1, o);
+//                     if result.is_some() {
+//                         return result;
+//                     }
+    
+//                     r = o.pop().unwrap();
+//                     c = r.borrow().column.clone();
+    
+//                     let mut j = r.borrow().left.clone();
+//                     while let Some(node_j) = j {
+//                         self.uncover(node_j.borrow().column.borrow_mut());
+    
+//                         j = node_j.borrow().left.clone();
+//                     }
+    
+//                     r = r.borrow().down.clone();
+//                 }
+    
+//                 self.uncover(c.borrow().column.borrow_mut());
+//             }
+    
+//             None
+//         }
+        
+//         DancingLinks { header, columns }
+//     }
+// }

@@ -3,12 +3,9 @@ name = "sudoku"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "sudoku"
-path = "src/sudoku.rs"
-
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+csv = "1.2.2"
 num = "0.4.1"
+rand = "0.8.5"
