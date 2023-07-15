@@ -178,30 +178,24 @@ pub trait Solver {
 
 pub struct BruteForceSolver;
 // Brute force solver.
-// This solver will try every possible number in every empty cell.
-// If it hits a dead end, it will backtrack and try a different number.
-
-// example usage:
-// let mut solver = BruteForceSolver;
-// if solver.solve(&mut board) {
-//     println!("Solution found:");
-//     board.print();
-// } else {
-//     println!("No solution found.");
-// }
+// This solver will try every possible candidate in every empty cell.
+// If it hits a dead end, it will backtrack and try a different candidate.
 
 impl Solver for BruteForceSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
         for row in 0..9 {
             for col in 0..9 {
+                let cell = Cell { row, col };
                 if board.board[row][col] == 0 {
-                    for num in 1..=9 {
+                    // Iterate over the candidates
+                    let candidates = board.candidates.get(&cell).unwrap().clone();
+                    for num in candidates {
                         if board.is_valid(row, col, num) {
-                            board.board[row][col] = num;
+                            board.assign(&cell, num);
                             if self.solve(board) {
                                 return true;
                             } else {
-                                board.board[row][col] = 0;
+                                board.unassign(&cell, num);
                             }
                         }
                     }
@@ -213,18 +207,13 @@ impl Solver for BruteForceSolver {
     }
 }
 
+
 pub struct RuleBasedSolver;
 // Rule-based solver.
 // Note that a naked tuple is accompanied by a hidden pair. So this will implement up to naked/hidden tuples. But not quads.
 
 impl Solver for RuleBasedSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
-        // Check each rule in order of complexity and apply if possible.
-        // If successful, call the solver again.
-        // If no rule can be applied AND the board is not solved, call the brute force solver.
-        // If the brute force solver fails, return false.
-        // If the brute force solver succeeds, return true.
-
         if self.apply_basic_rules(board) {
             return self.solve(board);
         } else if self.apply_intermediate_rules(board) {
@@ -252,22 +241,39 @@ impl Solver for RuleBasedSolver {
         if self.hidden_single(board) {
             return true;
         }
-        unimplemented!()
-        return false;
+        if self.naked_pair(board) {
+            return true;
+        }
+        if self.hidden_pair(board) {
+            return true;
+        }
+        false
     }
 
     fn apply_intermediate_rules(&self, board: &mut Sudoku) -> bool {
         // Apply intermediate rules here: Locked Candidates Type 1 and Type 2
         // Returns true if a rule could be applied, false otherwise
-        unimplemented!()
-        return false;
+
+        if self.locked_candidates_type_1(board) {
+            return true;
+        }
+        if self.locked_candidates_type_2(board) {
+            return true;
+        }
+        false
     }
 
     fn apply_complex_rules(&self, board: &mut Sudoku) -> bool {
         // Apply complex rules here: X-Wing, Swordfish
         // Returns true if a rule could be applied, false otherwise
-        unimplemented!()
-        return false;
+
+        if self.x_wing(board) {
+            return true;
+        }
+        if self.swordfish(board) {
+            return true;
+        }
+        false
     }
 
     fn solved(&self, board: &Sudoku) -> bool {
@@ -280,9 +286,12 @@ impl Solver for RuleBasedSolver {
             }
         }
         true
+    }
 }
 
 impl RuleBasedSolver {
+
+    // Basic rules: Naked Single, Hidden Single, Naked Pair, Hidden Pair
     
     fn naked_single(&self, board: &mut Sudoku) -> bool {
         for (cell, candidates) in board.candidates.iter() {
@@ -356,9 +365,147 @@ impl RuleBasedSolver {
         }
         false
     }
+
+    // Intermediate rules: Locked Candidates Type 1 and Type 2
+
+    fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
+        for block in board.blocks.iter() {
+            for digit in 1..=9 {
+                let candidate_cells: Vec<_> = block.iter().filter(|&&cell| board.candidates[cell].contains(&digit)).collect();
+                if candidate_cells.is_empty() {
+                    continue;
+                }
+
+                let rows: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.0).collect();
+                let cols: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.1).collect();
+
+                if rows.len() == 1 {
+                    let row = rows.into_iter().next().unwrap();
+                    for col in 0..9 {
+                        let cell = (row, col);
+                        if !block.contains(&cell) && board.candidates[cell].contains(&digit) {
+                            board.eliminate(cell, digit);
+                            return true;
+                        }
+                    }
+                } else if cols.len() == 1 {
+                    let col = cols.into_iter().next().unwrap();
+                    for row in 0..9 {
+                        let cell = (row, col);
+                        if !block.contains(&cell) && board.candidates[cell].contains(&digit) {
+                            board.eliminate(cell, digit);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
+        for row in 0..9 {
+            for digit in 1..=9 {
+                let candidate_cells: Vec<_> = (0..9).filter(|&col| board.candidates[(row, col)].contains(&digit)).map(|col| (row, col)).collect();
+                if candidate_cells.is_empty() {
+                    continue;
+                }
+
+                let blocks: HashSet<_> = candidate_cells.iter().map(|&cell| board.cell_to_block(cell)).collect();
+
+                if blocks.len() == 1 {
+                    let block = blocks.into_iter().next().unwrap();
+                    for &cell in block {
+                        if cell.0 != row && board.candidates[cell].contains(&digit) {
+                            board.eliminate(cell, digit);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        for col in 0..9 {
+            for digit in 1..=9 {
+                let candidate_cells: Vec<_> = (0..9).filter(|&row| board.candidates[(row, col)].contains(&digit)).map(|row| (row, col)).collect();
+                if candidate_cells.is_empty() {
+                    continue;
+                }
+
+                let blocks: HashSet<_> = candidate_cells.iter().map(|&cell| board.cell_to_block(cell)).collect();
+
+                if blocks.len() == 1 {
+                    let block = blocks.into_iter().next().unwrap();
+                    for &cell in block {
+                        if cell.1 != col && board.candidates[cell].contains(&digit) {
+                            board.eliminate(cell, digit);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    // Complex rules: X-Wing, Swordfish
+
+    fn x_wing(&self, board: &mut Sudoku) -> bool {
+        for digit in 1..=9 {
+            for i in 0..9 {
+                let i_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[(i, col)].contains(&digit)).collect();
+                if i_candidate_cols.len() != 2 {
+                    continue;
+                }
+
+                for j in i + 1..9 {
+                    let j_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[(j, col)].contains(&digit)).collect();
+
+                    if j_candidate_cols == i_candidate_cols {
+                        for &col in &i_candidate_cols {
+                            for row in 0..9 {
+                                let cell = (row, col);
+                                if row != i && row != j && board.candidates[cell].contains(&digit) {
+                                    board.eliminate(cell, digit);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn swordfish(&self, board: &mut Sudoku) -> bool {
+        for digit in 1..=9 {
+            let rows_with_digit: Vec<_> = (0..9).filter(|&row| (0..9).any(|col| board.candidates[(row, col)].contains(&digit))).collect();
+
+            if rows_with_digit.len() < 3 {
+                continue;
+            }
+
+            for combo in rows_with_digit.into_iter().combinations(3) {
+                let candidate_cols: Vec<_> = combo.iter().flat_map(|&row| (0..9).filter(move |&col| board.candidates[(row, col)].contains(&digit))).collect();
+                let unique_candidate_cols: HashSet<_> = candidate_cols.iter().cloned().collect();
+
+                if unique_candidate_cols.len() == 3 {
+                    for &col in &unique_candidate_cols {
+                        for row in 0..9 {
+                            let cell = (row, col);
+                            if !combo.contains(&row) && board.candidates[cell].contains(&digit) {
+                                board.eliminate(cell, digit);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
-
-
 
 // Crook's algorithm.
 
