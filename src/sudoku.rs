@@ -2,14 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::collections::LinkedList;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::clone::Clone;
 use rand::Rng;
 use core::cell::Cell;
 use crate::utils;
+use itertools::Itertools;
 
 // Basic structure of a sudoku board
+#[derive(Clone)]
 pub struct Sudoku {
     board: [[u8; 9]; 9],
-    units: HashMap<String, Vec<Vec<String>>>,
+    units: HashMap<String, Vec<HashSet<String>>>,
     peers: HashMap<String, HashSet<String>>,
     candidates: HashMap<String, HashSet<usize>>,
     // TODO? priority queue of cells ordered by the number of candidates.
@@ -22,7 +25,7 @@ impl Sudoku {
     // units: A hashmap that maps each cell to the list of 3 units that the cell belongs to.
     // peers: A hashmap that maps each cell to the set of its 20 peers (cells sharing a unit).
     // candidates: A hashmap that maps each cell to the set of its possible values.
-    fn new() -> Self {
+    pub fn new(puzzle: Option<&str>) -> Result<Self, &str> {
         let rows = "ABCDEFGHI".chars().collect::<Vec<_>>();
         let cols = (1..=9).map(|i| i.to_string()).collect::<Vec<_>>();
         let squares = utils::cross(&rows, &cols);
@@ -43,13 +46,14 @@ impl Sudoku {
                     unitlist.push(utils::cross(rs, cs));
                 }
             }
+            unitlist
         };
 
-        let units = squares.iter().map(|s| {
-            (s.to_string(), unitlist.iter().filter(|u| u.contains(s)).cloned().collect())
-        }).collect();
+        let units: HashMap<String, Vec<HashSet<String>>> = squares.iter().map(|s| {
+            (s.to_string(), unitlist.iter().filter(|u| u.contains(s)).map(|u| u.clone().into_iter().collect()).collect())
+        }).collect();        
 
-        let peers = squares.iter().map(|s| {
+        let peers: HashMap<String, HashSet<String>> = squares.iter().map(|s| {
             let units_s = units.get(s).unwrap();
             let mut peers_s = HashSet::new();
 
@@ -64,16 +68,23 @@ impl Sudoku {
             (s.to_string(), peers_s)
         }).collect();
 
-        Sudoku {
+        let mut sudoku = Sudoku {
             board: [[0; 9]; 9],
             units,
             peers,
             candidates: HashMap::new(),
+        };
+
+        if let Some(puzzle_str) = puzzle {
+            // If a puzzle string is provided, use it to populate the board.
+            sudoku.from_string(puzzle_str)?;
         }
+
+        Ok(sudoku)
     }
 
     // Creates a new Sudoku puzzle from a string.
-    pub fn from_string(&self, s: &str){
+    pub fn from_string(&mut self, s: &str) -> Result<(), &str> {
         if s.len() != 81 {
             return Err("Input string must be 81 characters long.");
         }
@@ -91,19 +102,20 @@ impl Sudoku {
                 if value > 9 {
                     return Err("Each digit must be from 0 to 9.");
                 }
-                grid[row][col] = value;
+                grid[row][col] = value as u8;
             }
         }
 
         self.board = grid;
         self.initialize_candidates();
+        Ok(())
     }
 
     // Initialize candidates for each cell, given the current board
     fn initialize_candidates(&mut self) {
         for row in 0..9 {
             for col in 0..9 {
-                let cell = format!("{}{}", (b'A' + row as u8) as char, col + 1);
+                let cell = utils::coords_to_cell(row, col);
                 if self.board[row][col] == 0 {
                     // If cell is empty, all numbers are possible candidates
                     self.candidates.insert(cell, (1..=9).collect());
@@ -119,7 +131,7 @@ impl Sudoku {
 
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
         // other_values is a set of digits that are not equal to the assigned digit
-        let other_values = self.candidates[cell].clone();
+        let mut other_values: HashSet<usize> = self.candidates[cell].clone();
         other_values.remove(&digit);
         // We try to eliminate all other values from the cell
         for d2 in other_values {
@@ -171,19 +183,35 @@ impl Sudoku {
     }
 
     // Check if a given number is valid in a given cell
+    // Check directly on the board. If the cell is 0, check if the number is valid
+    // Used in naive backtracking
     fn is_valid(&self, row: usize, col: usize, num: usize) -> bool {
-        // Convert row and col indices to corresponding cell string
-        let cell = format!("{}{}", (b'A' + row as u8) as char, col + 1);
-
-        // Check if num is in the same row, column, or box as the cell
-        for &peer in self.peers[&cell].iter() {
-            if let Some(val) = self.cells[peer] {
-                if val == num {
+        if self.board[row][col] != 0 {
+            return false;
+        }
+        // Check if num is in the same row
+        for i in 0..9 {
+            if self.board[row][i] == num as u8 {
+                return false;
+            }
+        }
+        // Check if num is in the same column
+        for i in 0..9 {
+            if self.board[i][col] == num as u8 {
+                return false;
+            }
+        }
+        // Check if num is in the same box
+        let box_row = row - row % 3;
+        let box_col = col - col % 3;
+        for i in box_row..box_row + 3 {
+            for j in box_col..box_col + 3 {
+                if self.board[i][j] == num as u8 {
                     return false;
                 }
             }
         }
-        return true;
+        true
     }
 
     // Check the unique elements in a given array
@@ -229,10 +257,12 @@ impl Sudoku {
         }
         true
     }
+
 }
 
 pub trait Solver {
     fn solve(&mut self, board: &mut Sudoku) -> bool;
+    fn name(&self) -> String;
 }
 
 pub struct BruteForceSolver;
@@ -244,13 +274,11 @@ impl Solver for BruteForceSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
         for row in 0..9 {
             for col in 0..9 {
-                let cell = Cell { row, col };
                 if board.board[row][col] == 0 {
-                    // Iterate over the candidates
-                    let candidates = board.candidates.get(&cell).unwrap().clone();
-                    for num in candidates {
+                    let cell = utils::coords_to_cell(row, col);
+                    for &num in board.candidates[&cell].iter() {
                         if board.is_valid(row, col, num) {
-                            board.board[row][col] = num; // directly assign num to the cell
+                            board.board[row][col] = num as u8; // directly assign num to the cell
                             if self.solve(board) {
                                 return true;
                             } else {
@@ -263,6 +291,16 @@ impl Solver for BruteForceSolver {
             }
         }
         true
+    }
+
+    fn name(&self) -> String {
+        "Brute Force Solver".to_string()
+    }
+}
+
+impl BruteForceSolver {
+    pub fn new() -> BruteForceSolver {
+        BruteForceSolver
     }
 }
 
@@ -334,6 +372,10 @@ impl Solver for BruteForceSolver {
 
 //         return false;
 //     }
+
+//     fn name(&self) -> String {
+//         "Constraint Programming Solver".to_string()
+//     }
 // }
 
 
@@ -354,10 +396,10 @@ impl Solver for RuleBasedSolver {
                 // Update self.board to be equivalent to the candidate board
                 for row in 0..9 {
                     for col in 0..9 {
-                        let cell = Cell { row, col };
+                        let cell = utils::coords_to_cell(row, col);
                         let candidates = board.candidates.get(&cell).unwrap().clone();
                         if candidates.len() == 1 {
-                            board.board[row][col] = candidates.iter().next().unwrap().clone();
+                            board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
                         }
                     }
                 }
@@ -368,10 +410,16 @@ impl Solver for RuleBasedSolver {
             }
         }
     }
+
+    fn name(&self) -> String {
+        "Rule Based Solver".to_string()
+    }
 }
 
 impl RuleBasedSolver {
-
+    pub fn new() -> RuleBasedSolver {
+        RuleBasedSolver
+    }
     
     fn apply_basic_rules(&self, board: &mut Sudoku) -> bool {
         // Apply basic rules here: Naked Single, Hidden Single, Naked Pair, Hidden Pair
@@ -423,7 +471,7 @@ impl RuleBasedSolver {
         // Check if the board is solved by verifying that every cell has exactly one candidate
         for row in 0..9 {
             for col in 0..9 {
-                let cell = Cell { row, col };
+                let cell = utils::coords_to_cell(row, col);
                 if let Some(candidates) = board.candidates.get(&cell) {
                     if candidates.len() != 1 {
                         return false;
@@ -450,11 +498,11 @@ impl RuleBasedSolver {
     // }
 
     fn hidden_single(&self, board: &mut Sudoku) -> bool {
-        for unit in board.units.values() {
+        for (cell, units) in &board.units {
             for digit in 1..=9 {
-                let digit_occurrences: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit)).cloned().collect();
+                let digit_occurrences: Vec<_> = units.iter().filter(|unit| unit.contains(cell) && board.candidates[cell].contains(&digit)).cloned().collect();
                 if digit_occurrences.len() == 1 {
-                    if !board.assign(&digit_occurrences[0], digit) {
+                    if !board.assign(cell, digit) {
                         panic!("Contradiction encountered during hidden single");
                     }
                     return true;
@@ -465,22 +513,20 @@ impl RuleBasedSolver {
     }
 
     fn naked_pair(&self, board: &mut Sudoku) -> bool {
-        for unit in board.units.values() {
-            for i in 0..8 {
-                for j in (i+1)..9 {
-                    let cell1 = unit[i];
-                    let cell2 = unit[j];
-                    if board.candidates[&cell1] == board.candidates[&cell2] && board.candidates[&cell1].len() == 2 {
-                        let other_cells: Vec<_> = unit.iter().filter(|&&c| c != cell1 && c != cell2).cloned().collect();
-                        for &digit in &board.candidates[cell1] {
-                            for &cell in &other_cells {
-                                if !board.eliminate(cell, digit) {
-                                    panic!("Contradiction encountered during naked pair");
-                                }
-                            }
+        for (cell, units) in &board.units {
+            let candidates = &board.candidates[cell];
+            if candidates.len() != 2 {
+                continue;
+            }
+            for unit in units {
+                let other_cells: Vec<_> = unit.iter().filter(|&cell2| cell2 != cell && board.candidates[cell2] == *candidates).collect();
+                if other_cells.len() == 1 {
+                    for &digit in candidates {
+                        if !board.eliminate(&other_cells[0], digit) {
+                            panic!("Contradiction encountered during naked pair");
                         }
-                        return true;
                     }
+                    return true;
                 }
             }
         }
@@ -488,54 +534,67 @@ impl RuleBasedSolver {
     }
 
     fn hidden_pair(&self, board: &mut Sudoku) -> bool {
-        for unit in board.units.values() {
-            for digit1 in 1..9 {
-                for digit2 in (digit1+1)..10 {
-                    let cells_with_digits: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit1) || board.candidates[&cell].contains(&digit2)).cloned().collect();
-                    if cells_with_digits.len() == 2 {
-                        for &cell in &cells_with_digits {
-                            let other_digits: Vec<_> = (1..10).filter(|&d| d != digit1 && d != digit2).collect();
-                            for &digit in &other_digits {
-                                if !board.eliminate(cell, digit) {
-                                    panic!("Contradiction encountered during hidden pair");
+        for (cell, units) in &board.units {
+            for unit in units {
+                for digit1 in 1..9 {
+                    for digit2 in (digit1+1)..10 {
+                        let cells_with_digits: Vec<_> = unit.iter().filter(|&&cell2| board.candidates[&cell2].contains(&digit1) || board.candidates[&cell2].contains(&digit2)).collect();
+                        if cells_with_digits.len() == 2 && cells_with_digits.contains(&cell) {
+                            for &digit in board.candidates[cell].iter() {
+                                if digit != digit1 && digit != digit2 {
+                                    if !board.eliminate(cell, digit) {
+                                        panic!("Contradiction encountered during hidden pair");
+                                    }
                                 }
                             }
+                            return true;
                         }
-                        return true;
                     }
                 }
             }
         }
         false
     }
+    
 
     // Intermediate rules: Locked Candidates Type 1 and Type 2
 
+    // Locked Candidates Type 1:
+    // If in a box all candidates of a certain digit are confined to a row or column,
+    // that digit cannot appear outside of that box in that row or column.
     fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
-        for block in board.blocks.iter() {
+        // Iterate through each unit in the Sudoku board
+        for unit in board.units.values().flatten() {
+            // Check for each digit from 1 to 9
             for digit in 1..=9 {
-                let candidate_cells: Vec<_> = block.iter().filter(|&&cell| board.candidates[cell].contains(&digit)).collect();
+                // Find the cells in the current unit that contain the digit as a candidate
+                let candidate_cells: Vec<_> = unit.iter().filter(|&cell| board.candidates[cell].contains(&digit)).collect();
+                
+                // If there are no such cells, move on to the next digit
                 if candidate_cells.is_empty() {
                     continue;
                 }
 
-                let rows: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.0).collect();
-                let cols: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.1).collect();
+                // Determine the rows and columns in which the candidates are located
+                let rows: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.chars().next().unwrap()).collect();
+                let cols: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.chars().nth(1).unwrap()).collect();
 
+                // If all candidates are in a single row
                 if rows.len() == 1 {
                     let row = rows.into_iter().next().unwrap();
-                    for col in 0..9 {
-                        let cell = (row, col);
-                        if !block.contains(&cell) && board.candidates[cell].contains(&digit) {
+                    // Then in that row, eliminate the digit from the peers of the box that are not in the box
+                    for cell in board.peers.keys() {
+                        if cell.starts_with(row) && !unit.contains(cell) && board.candidates[cell].contains(&digit) {
                             board.eliminate(cell, digit);
                             return true;
                         }
                     }
+                // If all candidates are in a single column
                 } else if cols.len() == 1 {
                     let col = cols.into_iter().next().unwrap();
-                    for row in 0..9 {
-                        let cell = (row, col);
-                        if !block.contains(&cell) && board.candidates[cell].contains(&digit) {
+                    // Then in that column, eliminate the digit from the peers of the box that are not in the box
+                    for cell in board.peers.keys() {
+                        if cell.ends_with(col) && !unit.contains(cell) && board.candidates[cell].contains(&digit) {
                             board.eliminate(cell, digit);
                             return true;
                         }
@@ -546,42 +605,36 @@ impl RuleBasedSolver {
         false
     }
 
+    
+
+    // Locked Candidates Type 2:
+    // If in a row (or column) all candidates of a certain digit are confined to one box,
+    // that candidate that be eliminated from all other cells in that box.
     fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
-        for row in 0..9 {
+        // Iterate through each unit in the Sudoku board
+        for unit in board.units.values().flatten() {
+            // Check for each digit from 1 to 9
             for digit in 1..=9 {
-                let candidate_cells: Vec<_> = (0..9).filter(|&col| board.candidates[&(row, col)].contains(&digit)).map(|col| (row, col)).collect();
+                // Find the cells in the current unit that contain the digit as a candidate
+                let candidate_cells: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit)).collect();
+                
+                // If there are no such cells, move on to the next digit
                 if candidate_cells.is_empty() {
                     continue;
                 }
 
-                let blocks: HashSet<_> = candidate_cells.iter().map(|&cell| board.cell_to_block(cell)).collect();
+                // Determine the boxes in which the candidates are located
+                let blocks: Vec<_> = candidate_cells.iter().map(|cell| {
+                    board.units[*cell].iter().filter(|unit| unit.len() == 9 && unit.iter().any(|cell| cell.chars().nth(2).is_some())).collect::<Vec<_>>()
+                }).flatten().collect();
 
+                // If all candidates are in a single box
                 if blocks.len() == 1 {
-                    let block = blocks.into_iter().next().unwrap();
-                    for &cell in block {
-                        if cell.0 != row && board.candidates[cell].contains(&digit) {
-                            board.eliminate(cell, digit);
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        for col in 0..9 {
-            for digit in 1..=9 {
-                let candidate_cells: Vec<_> = (0..9).filter(|&row| board.candidates[&(row, col)].contains(&digit)).map(|row| (row, col)).collect();
-                if candidate_cells.is_empty() {
-                    continue;
-                }
-
-                let blocks: HashSet<_> = candidate_cells.iter().map(|&cell| board.cell_to_block(cell)).collect();
-
-                if blocks.len() == 1 {
-                    let block = blocks.into_iter().next().unwrap();
-                    for &cell in block {
-                        if cell.1 != col && board.candidates[cell].contains(&digit) {
-                            board.eliminate(cell, digit);
+                    let block = blocks[0].clone();
+                    // Then in that box, eliminate the digit from the cells that are not in the row or column
+                    for &cell in &block {
+                        if !unit.contains(&cell) && board.candidates[&cell].contains(&digit) {
+                            board.eliminate(&cell, digit);
                             return true;
                         }
                     }
@@ -590,26 +643,47 @@ impl RuleBasedSolver {
         }
         false
     }
+
+    
 
     // Complex rules: X-Wing, Swordfish
 
+    // X-Wing:
+    // Look for two rows (the base sets) with two candidates of the same digit (the fish digit).
+    // If you can find two columns, such that all candidates of the specific digit in both rows
+    // are contained in the columns (the cover sets), all fish candidates in the columns that are not
+    // part of the rows can be eliminated. The result is called an X-Wing in the rows.
     fn x_wing(&self, board: &mut Sudoku) -> bool {
         for digit in 1..=9 {
-            for i in 0..9 {
-                let i_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[&(i, col)].contains(&digit)).collect();
-                if i_candidate_cols.len() != 2 {
-                    continue;
-                }
-
-                for j in i + 1..9 {
-                    let j_candidate_cols: Vec<_> = (0..9).filter(|&col| board.candidates[&(j, col)].contains(&digit)).collect();
-
-                    if j_candidate_cols == i_candidate_cols {
-                        for &col in &i_candidate_cols {
-                            for row in 0..9 {
-                                let cell = (row, col);
-                                if row != i && row != j && board.candidates[&cell].contains(&digit) {
-                                    board.eliminate(cell, digit);
+            // Check rows as base sets
+            if self.x_wing_base_sets(board, digit, |i| (0..9).map(|j| utils::coords_to_cell(i, j)).collect()) {
+                return true;
+            }
+            // Check columns as base sets
+            if self.x_wing_base_sets(board, digit, |j| (0..9).map(|i| utils::coords_to_cell(i, j)).collect()) {
+                return true;
+            }
+        }
+        false
+    }
+    
+    fn x_wing_base_sets(&self, board: &mut Sudoku, digit: usize, base_set_fn: impl Fn(usize) -> Vec<String>) -> bool {
+        for i in 0..9 {
+            let i_base_set = base_set_fn(i);
+            let i_candidate_indices: Vec<_> = i_base_set.iter().enumerate().filter(|(_, &cell)| board.candidates[&cell].contains(&digit)).map(|(index, _)| index).collect();
+            if i_candidate_indices.len() != 2 {
+                continue;
+            }
+            for j in i + 1..9 {
+                let j_base_set = base_set_fn(j);
+                let j_candidate_indices: Vec<_> = j_base_set.iter().enumerate().filter(|(_, &cell)| board.candidates[&cell].contains(&digit)).map(|(index, _)| index).collect();
+                if j_candidate_indices == i_candidate_indices {
+                    for &index in &i_candidate_indices {
+                        for k in 0..9 {
+                            if k != i && k != j {
+                                let cell = base_set_fn(k)[index].clone();
+                                if board.candidates[&cell].contains(&digit) {
+                                    board.eliminate(&cell, digit);
                                     return true;
                                 }
                             }
@@ -620,25 +694,44 @@ impl RuleBasedSolver {
         }
         false
     }
+    
 
+    
+
+    // Swordfish:
+    // Look for three rows (the base sets) with two or three candidates of the same digit (the fish digit).
+    // If you can find three columns, such that all candidates of the specific digit in the three rows
+    // are contained in the columns (the cover sets), all fish candidates in the columns that are not
+    // part of the rows can be eliminated. The result is called a Swordfish in the rows.
     fn swordfish(&self, board: &mut Sudoku) -> bool {
         for digit in 1..=9 {
-            let rows_with_digit: Vec<_> = (0..9).filter(|&row| (0..9).any(|col| board.candidates[&(row, col)].contains(&digit))).collect();
-
-            if rows_with_digit.len() < 3 {
-                continue;
+            // Check rows as base sets
+            if self.swordfish_base_sets(board, digit, |i| (0..9).map(|j| utils::coords_to_cell(i, j)).collect()) {
+                return true;
             }
-
-            for combo in rows_with_digit.into_iter().combinations(3) {
-                let candidate_cols: Vec<_> = combo.iter().flat_map(|&row| (0..9).filter(move |&col| board.candidates[&(row, col)].contains(&digit))).collect();
-                let unique_candidate_cols: HashSet<_> = candidate_cols.iter().cloned().collect();
-
-                if unique_candidate_cols.len() == 3 {
-                    for &col in &unique_candidate_cols {
-                        for row in 0..9 {
-                            let cell = (row, col);
-                            if !combo.contains(&row) && board.candidates[&cell].contains(&digit) {
-                                board.eliminate(cell, digit);
+            // Check columns as base sets
+            if self.swordfish_base_sets(board, digit, |j| (0..9).map(|i| utils::coords_to_cell(i, j)).collect()) {
+                return true;
+            }
+        }
+        false
+    }
+    
+    fn swordfish_base_sets(&self, board: &mut Sudoku, digit: usize, base_set_fn: impl Fn(usize) -> Vec<String>) -> bool {
+        let base_sets_with_digit: Vec<_> = (0..9).filter(|&i| base_set_fn(i).iter().any(|cell| board.candidates[cell].contains(&digit))).collect();
+        if base_sets_with_digit.len() < 3 {
+            return false;
+        }
+        for combo in base_sets_with_digit.into_iter().combinations(3) {
+            let candidate_indices: Vec<_> = combo.iter().flat_map(|&i| base_set_fn(i).iter().enumerate().filter(move |(_, &cell)| board.candidates[&cell].contains(&digit)).map(|(index, _)| index)).collect();
+            let unique_candidate_indices: HashSet<_> = candidate_indices.iter().cloned().collect();
+            if unique_candidate_indices.len() == 3 {
+                for &index in &unique_candidate_indices {
+                    for k in 0..9 {
+                        if !combo.contains(&k) {
+                            let cell = base_set_fn(k)[index].clone();
+                            if board.candidates[&cell].contains(&digit) {
+                                board.eliminate(&cell, digit);
                                 return true;
                             }
                         }
@@ -648,6 +741,9 @@ impl RuleBasedSolver {
         }
         false
     }
+    
+
+    
 }
 
 // Crook's algorithm.
@@ -656,49 +752,83 @@ impl RuleBasedSolver {
     
 // Stochastic search.
 
-pub struct Stochastic {
+pub struct StochasticSolver {
     temperature: f64,
     cooling_factor: f64,
+    units: Vec<Vec<String>>,
 }
 
 // Uses stochastic search with simulated annealing.
 // https://en.wikipedia.org/wiki/Simulated_annealing
-impl Stochastic {
-    pub fn new(temperature: f64, cooling_factor: f64) -> Self {
-        Stochastic { 
+
+impl Solver for StochasticSolver {
+    fn solve(&mut self, board: &mut Sudoku) -> bool {
+        let mut score = self.score(board);
+        while score > -162 {
+            let old_board = board.clone();
+            let old_score = score;
+
+            self.swap_random(board);
+            score = self.score(board);
+
+            if !self.accept(score - old_score) {
+                *board = old_board;
+                score = old_score;
+            }
+
+            self.cool_down();
+        }
+        score == -162
+    }
+
+    fn name(&self) -> String {
+        format!("Stochastic (T={}, cooling={})", self.temperature, self.cooling_factor)
+    }
+} 
+
+impl StochasticSolver {
+    pub fn new(temperature: f64, cooling_factor: f64, board: &Sudoku) -> Self {
+        let units: Vec<Vec<String>> = board.units.values()
+            .map(|unit| unit.iter().flat_map(HashSet::iter).cloned().collect())
+            .collect();
+
+        StochasticSolver { 
             temperature, 
             cooling_factor,
+            units,
         }
     }
 
-    // Swap two cells randomly within the same unit
+    // First get a random unit,
+    // Then get two random cells within that unit, and swap their values.
     fn swap_random(&self, board: &mut Sudoku) {
-        let unit_index = rand::thread_rng().gen_range(0..board.units.len());
-        let unit = &board.units[&unit_index];
+        let unit_index = rand::thread_rng().gen_range(0..self.units.len());
+        let unit = &self.units[unit_index];
         let mut rng = rand::thread_rng();
         let (i, j) = (rng.gen_range(0..unit.len()), rng.gen_range(0..unit.len()));
-        let temp = board.board[unit[i].0][unit[i].1];
-        board.board[unit[i].0][unit[i].1] = board.board[unit[j].0][unit[j].1];
-        board.board[unit[j].0][unit[j].1] = temp;
+        
+        let coords_i = utils::cell_to_coords(&unit[i]);
+        let coords_j = utils::cell_to_coords(&unit[j]);
+
+        let temp = board.board[coords_i.0][coords_i.1];
+        board.board[coords_i.0][coords_i.1] = board.board[coords_j.0][coords_j.1];
+        board.board[coords_j.0][coords_j.1] = temp;
     }
 
-    // Define the error function
     fn score(&self, board: &Sudoku) -> i32 {
         let mut score = 0;
         for i in 0..9 {
             let row = board.board[i];
-            let column: Vec<u8> = (0..9).map(|j| board.board[j][i]).collect();
+            let column: [u8; 9] = (0..9).map(|j| board.board[j][i]).collect::<Vec<u8>>().try_into().unwrap();
             score -= Sudoku::unique_elements(row) + Sudoku::unique_elements(column);
         }
         score
     }
 
-    // Implement the annealing schedule
     fn cool_down(&mut self) {
         self.temperature *= self.cooling_factor;
     }
 
-    // Check if we should accept the new state
     fn accept(&self, delta_s: i32) -> bool {
         if delta_s >= 0 {
             true
@@ -709,33 +839,7 @@ impl Stochastic {
     }
 }
 
-impl Solver for Stochastic {
-    fn solve(&mut self, board: &mut Sudoku) -> bool {
-        let mut score = self.score(board);
-        while score > -162 {
-            // Store the current board and score
-            let old_board = board.clone();
-            let old_score = score;
 
-            // Make a random move
-            self.swap_random(board);
-            
-            // Evaluate the new score
-            score = self.score(board);
-            
-            // Decide whether to keep the new state
-            if !self.accept(score - old_score) {
-                // Restore the old board and score
-                *board = old_board;
-                score = old_score;
-            }
-
-            // Cool down the system
-            self.cool_down();
-        }
-        score == -162
-    }
-}
 
 // Knuth's Algorithm X, with dancing links.
 // This definitely won't work right now, or anytime in the future.
