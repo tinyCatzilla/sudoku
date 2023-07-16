@@ -68,29 +68,31 @@ impl Sudoku {
             (s.to_string(), peers_s)
         }).collect();
 
-        let mut sudoku = Sudoku {
-            board: [[0; 9]; 9],
+        let mut board: [[u8; 9]; 9] = [[0; 9]; 9];
+
+        if let Some(puzzle_str) = puzzle {
+            // If a puzzle string is provided, use it to populate the board.
+            board = Self::from_string(puzzle_str)?; // Change the from_string function to return Result<[[u8; 9]; 9], &str>
+        }
+    
+        let sudoku = Sudoku {
+            board,
             units,
             peers,
             candidates: HashMap::new(),
         };
-
-        if let Some(puzzle_str) = puzzle {
-            // If a puzzle string is provided, use it to populate the board.
-            sudoku.from_string(puzzle_str)?;
-        }
-
+    
         Ok(sudoku)
     }
 
     // Creates a new Sudoku puzzle from a string.
-    pub fn from_string(&mut self, s: &str) -> Result<(), &str> {
+    pub fn from_string(s: &str) -> Result<[[u8; 9]; 9], &str> {
         if s.len() != 81 {
             return Err("Input string must be 81 characters long.");
         }
-
+    
         let mut grid: [[u8; 9]; 9] = [[0; 9]; 9]; // Initialise an empty 2D array
-
+    
         for row in 0..9 {
             for col in 0..9 {
                 let c = s.chars().nth(9*row + col).unwrap();
@@ -105,10 +107,8 @@ impl Sudoku {
                 grid[row][col] = value as u8;
             }
         }
-
-        self.board = grid;
-        self.initialize_candidates();
-        Ok(())
+    
+        Ok(grid)
     }
 
     // Initialize candidates for each cell, given the current board
@@ -160,14 +160,14 @@ impl Sudoku {
         else if self.candidates[cell].len() == 1 {
             let d2 = *self.candidates[cell].iter().next().unwrap();
             // If elimination from any peer results in a contradiction, we return false
-            if !self.peers[cell].iter().all(|&s2| self.eliminate(&s2, d2)) {
+            if !self.peers[cell].iter().all(|s2| self.eliminate(&s2, d2)) {
                 return false;
             }
         }
         
         // Finally, we ensure that for every unit of the cell, the digit has at least one place it can be
         for unit in self.units[cell].iter() {
-            let d_places: Vec<_> = unit.iter().filter(|&&s| self.candidates[&s].contains(&digit)).cloned().collect();
+            let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).cloned().collect();
             // If not, we return false to signal a contradiction
             if d_places.is_empty() {
                 return false;
@@ -272,26 +272,39 @@ pub struct BruteForceSolver;
 
 impl Solver for BruteForceSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
+        let mut empty_cells = vec![];
         for row in 0..9 {
             for col in 0..9 {
                 if board.board[row][col] == 0 {
-                    let cell = utils::coords_to_cell(row, col);
-                    for &num in board.candidates[&cell].iter() {
-                        if board.is_valid(row, col, num) {
-                            board.board[row][col] = num as u8; // directly assign num to the cell
-                            if self.solve(board) {
-                                return true;
-                            } else {
-                                board.board[row][col] = 0; // directly unassign the cell
-                            }
-                        }
-                    }
-                    return false; // backtrack if no candidate number leads to a solution
+                    empty_cells.push((row, col));
                 }
             }
         }
-        true
+    
+        empty_cells.sort_by_key(|&(row, col)| board.candidates[&utils::coords_to_cell(row, col)].len());
+    
+        if empty_cells.is_empty() {
+            return true; // All cells filled, solution found
+        }
+    
+        let (row, col) = empty_cells[0];
+        let cell = utils::coords_to_cell(row, col);
+        let candidates = board.candidates[&cell].clone(); // Clone the candidates for the first empty cell
+    
+        for &num in candidates.iter() {
+            if board.is_valid(row, col, num) {
+                board.board[row][col] = num as u8;
+                if self.solve(board) {
+                    return true;
+                }
+                board.board[row][col] = 0; // Undo the assignment
+            }
+        }
+    
+        false // No solution found
     }
+    
+
 
     fn name(&self) -> String {
         "Brute Force Solver".to_string()
@@ -498,11 +511,15 @@ impl RuleBasedSolver {
     // }
 
     fn hidden_single(&self, board: &mut Sudoku) -> bool {
-        for (cell, units) in &board.units {
+        // Get keys first without holding reference to board
+        let keys: Vec<String> = board.units.keys().cloned().collect();
+    
+        for cell in keys {
             for digit in 1..=9 {
-                let digit_occurrences: Vec<_> = units.iter().filter(|unit| unit.contains(cell) && board.candidates[cell].contains(&digit)).cloned().collect();
+                // Now we can safely borrow `board.units` again
+                let digit_occurrences: Vec<_> = board.units[&cell].iter().filter(|unit| unit.contains(&cell) && board.candidates[&cell].contains(&digit)).cloned().collect();
                 if digit_occurrences.len() == 1 {
-                    if !board.assign(cell, digit) {
+                    if !board.assign(&cell, digit) {
                         panic!("Contradiction encountered during hidden single");
                     }
                     return true;
@@ -511,6 +528,7 @@ impl RuleBasedSolver {
         }
         false
     }
+    
 
     fn naked_pair(&self, board: &mut Sudoku) -> bool {
         for (cell, units) in &board.units {
@@ -519,7 +537,10 @@ impl RuleBasedSolver {
                 continue;
             }
             for unit in units {
-                let other_cells: Vec<_> = unit.iter().filter(|&cell2| cell2 != cell && board.candidates[cell2] == *candidates).collect();
+                let other_cells: Vec<_> = unit.iter()
+                    .filter(|&cell2| *cell2 != *cell && board.candidates[cell2] == *candidates)
+                    .cloned() // Clone the cells to avoid borrowing `board`
+                    .collect();
                 if other_cells.len() == 1 {
                     for &digit in candidates {
                         if !board.eliminate(&other_cells[0], digit) {
@@ -532,17 +553,20 @@ impl RuleBasedSolver {
         }
         false
     }
-
+    
     fn hidden_pair(&self, board: &mut Sudoku) -> bool {
         for (cell, units) in &board.units {
             for unit in units {
                 for digit1 in 1..9 {
-                    for digit2 in (digit1+1)..10 {
-                        let cells_with_digits: Vec<_> = unit.iter().filter(|&&cell2| board.candidates[&cell2].contains(&digit1) || board.candidates[&cell2].contains(&digit2)).collect();
+                    for digit2 in (digit1 + 1)..10 {
+                        let cells_with_digits: Vec<_> = unit.iter()
+                            .filter(|&cell2| board.candidates[cell2].contains(&digit1) || board.candidates[cell2].contains(&digit2))
+                            .cloned() // Clone the cells to avoid borrowing `board`
+                            .collect();
                         if cells_with_digits.len() == 2 && cells_with_digits.contains(&cell) {
-                            for &digit in board.candidates[cell].iter() {
+                            for &digit in &board.candidates[cell] {
                                 if digit != digit1 && digit != digit2 {
-                                    if !board.eliminate(cell, digit) {
+                                    if !board.eliminate(&cell, digit) {
                                         panic!("Contradiction encountered during hidden pair");
                                     }
                                 }
@@ -555,6 +579,7 @@ impl RuleBasedSolver {
         }
         false
     }
+    
     
 
     // Intermediate rules: Locked Candidates Type 1 and Type 2
@@ -576,8 +601,8 @@ impl RuleBasedSolver {
                 }
 
                 // Determine the rows and columns in which the candidates are located
-                let rows: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.chars().next().unwrap()).collect();
-                let cols: HashSet<_> = candidate_cells.iter().map(|&&cell| cell.chars().nth(1).unwrap()).collect();
+                let rows: HashSet<_> = candidate_cells.iter().map(|&cell| cell.chars().next().unwrap()).collect();
+                let cols: HashSet<_> = candidate_cells.iter().map(|&cell| cell.chars().nth(1).unwrap()).collect();
 
                 // If all candidates are in a single row
                 if rows.len() == 1 {
@@ -616,7 +641,7 @@ impl RuleBasedSolver {
             // Check for each digit from 1 to 9
             for digit in 1..=9 {
                 // Find the cells in the current unit that contain the digit as a candidate
-                let candidate_cells: Vec<_> = unit.iter().filter(|&&cell| board.candidates[&cell].contains(&digit)).collect();
+                let candidate_cells: Vec<_> = unit.iter().filter(|&cell| board.candidates[cell].contains(&digit)).collect();
                 
                 // If there are no such cells, move on to the next digit
                 if candidate_cells.is_empty() {
@@ -632,7 +657,7 @@ impl RuleBasedSolver {
                 if blocks.len() == 1 {
                     let block = blocks[0].clone();
                     // Then in that box, eliminate the digit from the cells that are not in the row or column
-                    for &cell in &block {
+                    for cell in block {
                         if !unit.contains(&cell) && board.candidates[&cell].contains(&digit) {
                             board.eliminate(&cell, digit);
                             return true;
