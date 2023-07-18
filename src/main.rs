@@ -23,7 +23,7 @@ use crate::sudoku::{Sudoku, BruteForceSolver,
                 // Box::new(BruteForceSolver::new()),
                 // Box::new(CSPSolver::new(sudoku.clone())),
                 // Box::new(RuleBasedSolver::new()),
-                Box::new(StochasticSolver::new(10000000.0, 0.9999, &sudoku.clone())),
+                Box::new(StochasticSolver::new(10000.0, 0.999999, &sudoku.clone())),
             ];
     
             for mut solver in solvers {

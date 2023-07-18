@@ -966,14 +966,14 @@ impl StochasticSolver {
     }
 
     fn accept(&self, delta_s: i32) -> bool {
-        if delta_s < 0 {
+        if delta_s <= 0 {
             true
         } else {
             let u: f64 = rand::thread_rng().gen();
             println!("u: {}", u);
             println!("delta_s: {}", delta_s);
             println!("temperature: {}", self.temperature);
-            (delta_s as f64 / self.temperature).exp() <= u
+            (delta_s as f64 / self.temperature).exp() < u
         }
     }
 }
