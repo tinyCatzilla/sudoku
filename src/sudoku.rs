@@ -1,42 +1,38 @@
 use std::collections::{HashMap, HashSet};
-use std::collections::LinkedList;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::clone::Clone;
 use std::{str, vec};
 use rand::Rng;
-use core::cell::Cell;
 use crate::utils;
-use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 
+// use std::collections::LinkedList;
+// use std::rc::Rc;
+// use itertools::Itertools;
 // Basic structure of a sudoku board
 #[derive(Clone)]
 pub struct Sudoku {
     board: [[u8; 9]; 9],
-    squares: Vec<String>,
+    cells: Vec<String>,
     row_peers: HashMap<String, HashSet<String>>,
     col_peers: HashMap<String, HashSet<String>>,
     box_peers: HashMap<String, HashSet<String>>,
     peers: HashMap<String, HashSet<String>>,
     candidates: HashMap<String, HashSet<usize>>,
-    // TODO? priority queue of cells ordered by the number of candidates.
 }
 
 impl Sudoku {
     // Instantiate
-    // squares: A list of strings representing the 81 cells of the Sudoku puzzle.
-    // unitlist: A list of lists, where each sub-list is a "unit" that consists of the indices of 9 cells.
-    // row_peers
-    // col_peers
-    // box_peers
+    // cells: A list of strings representing the 81 cells of the Sudoku puzzle.
+    // row_peers: A hashmap that maps each cell to the set of its 8 row peers.
+    // col_peers: A hashmap that maps each cell to the set of its 8 column peers.
+    // box_peers: A hashmap that maps each cell to the set of its 8 box peers.
     // peers: A hashmap that maps each cell to the set of its 20 peers (cells sharing a unit).
     // candidates: A hashmap that maps each cell to the set of its possible values.
     pub fn new(puzzle: Option<&str>) -> Result<Self, &str> {
         let rows = "ABCDEFGHI".chars().collect::<Vec<_>>();
         let cols = "123456789".chars().collect::<Vec<_>>();
-        let squares: Vec<String> = utils::cross(&rows, &cols);
+        let cells: Vec<String> = utils::cross(&rows, &cols);
 
         let unitlist = {
             let mut unitlist = Vec::new();
@@ -61,11 +57,11 @@ impl Sudoku {
         let mut col_peers: HashMap<String, HashSet<String>> = HashMap::new();
         let mut box_peers: HashMap<String, HashSet<String>> = HashMap::new();
 
-        let units: HashMap<String, Vec<HashSet<String>>> = squares.iter().map(|s| {
+        let units: HashMap<String, Vec<HashSet<String>>> = cells.iter().map(|s| {
             (s.to_string(), unitlist.iter().filter(|u| u.contains(s)).map(|u| u.clone().into_iter().collect()).collect())
         }).collect();        
 
-        for s in &squares {
+        for s in &cells {
             let unit_cells = units.get(s).unwrap();
             let mut row_peers_s = HashSet::new();
             let mut col_peers_s = HashSet::new();
@@ -94,7 +90,7 @@ impl Sudoku {
             box_peers.insert(s.to_string(), box_peers_s);
         }        
 
-        let peers: HashMap<String, HashSet<String>> = squares.iter().map(|s| {
+        let peers: HashMap<String, HashSet<String>> = cells.iter().map(|s| {
             let units_s = units.get(s).unwrap();
             let mut peers_s = HashSet::new();
 
@@ -118,7 +114,7 @@ impl Sudoku {
     
         let sudoku = Sudoku {
             board,
-            squares,
+            cells,
             row_peers,
             col_peers,
             box_peers,
@@ -157,15 +153,19 @@ impl Sudoku {
 
     // Initialize candidates for each cell, given the current board
     fn initialize_candidates(&mut self) {
+        // First, initialize candidates for each cell as if they were all empty
+        for cell in &self.cells {
+            self.candidates.insert(cell.clone(), (1..=9).collect());
+        }
+
+        // Then, go through the board and for each cell that has a value,
+        // remove this value from the candidates of all its peers
         for row in 0..9 {
             for col in 0..9 {
                 let cell = utils::coords_to_cell(row, col);
-                if self.board[row][col] == 0 {
-                    // If cell is empty, all numbers are possible candidates
-                    self.candidates.insert(cell, (1..=9).collect());
-                } else {
-                    // If cell has a value, assign it
-                    self.candidates.insert(cell, vec![self.board[row][col] as usize].into_iter().collect());
+                let digit = self.board[row][col];
+                if digit != 0 {
+                    self.assign(&cell, digit as usize);
                 }
             }
         }
@@ -191,11 +191,16 @@ impl Sudoku {
         if !self.candidates[cell].contains(&digit) {
             return true;
         }
-        // Otherwise, we remove the digit from the candidates
-        self.candidates.get_mut(cell).unwrap().remove(&digit);
+        // If the digit has more than one candidate, we remove it from the candidates of the cell
+        if self.candidates[cell].len() > 1 {
+            self.candidates.get_mut(cell).unwrap().remove(&digit);
+            println!("Eliminated {} from {}", digit, cell);
+            println!("Candidates for {} are now {:?}", cell, self.candidates[cell]);
+        }
         
         // If the cell has no remaining candidates, we return false to signal a contradiction
         if self.candidates[cell].is_empty() {
+            println!("Contradiction: {} has no candidates left", cell);
             return false;
         } 
         // If the cell has one remaining candidate, we need to eliminate this digit from all peers
@@ -208,6 +213,7 @@ impl Sudoku {
             // If elimination from any peer results in a contradiction, we return false
             for s2 in peers.iter() {
                 if !self.eliminate(s2, d2) {
+                    println!("Elimination of {} from {} resulted in a contradiction", d2, s2);
                     return false;
                 }
             }
@@ -314,6 +320,7 @@ impl Sudoku {
 pub trait Solver {
     fn solve(&mut self, board: &mut Sudoku) -> bool;
     fn name(&self) -> String;
+    fn initialize_candidates(&mut self, sudoku: &mut Sudoku);
 }
 
 pub struct BruteForceSolver;
@@ -323,7 +330,6 @@ pub struct BruteForceSolver;
 
 impl Solver for BruteForceSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
-        board.initialize_candidates();
         let mut empty_cells = vec![];
         for row in 0..9 {
             for col in 0..9 {
@@ -343,6 +349,7 @@ impl Solver for BruteForceSolver {
         empty_cells.sort_by_key(|&(row, col)| board.candidates[&utils::coords_to_cell(row, col)].len());
     
         if empty_cells.is_empty() {
+            println!("Brute force solved!");
             return true; // All cells filled, solution found
         }
     
@@ -367,6 +374,11 @@ impl Solver for BruteForceSolver {
 
     fn name(&self) -> String {
         "Brute Force Solver".to_string()
+    }
+
+    fn initialize_candidates(&mut self, board: &mut Sudoku) {
+        board.initialize_candidates();
+        println!("Candidates: {:?}", board.candidates);
     }
 }
 
@@ -448,51 +460,88 @@ impl BruteForceSolver {
 //     fn name(&self) -> String {
 //         "Constraint Programming Solver".to_string()
 //     }
+
+//     fn initialize_candidates(&mut self, sudoku: &mut Sudoku) {
+//         board.initialize_candidates();
+//         println!("Candidates: {:?}", board.candidates);
+//     }
 // }
 
 
-pub struct RuleBasedSolver;
+pub struct RuleBasedSolver{
+    cells_with_candidates: Vec<String>
+}
 // Rule-based solver.
 // Note that a naked tuple is accompanied by a hidden pair. So this will implement up to naked/hidden tuples. But not quads.
 
 impl Solver for RuleBasedSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
-        board.initialize_candidates();
-        println!("Candidates: {:?}", board.candidates);
-        if self.apply_basic_rules(board) {
-            return self.solve(board);
-        } else if self.apply_intermediate_rules(board) {
-            return self.solve(board);
-        // } else if self.apply_complex_rules(board) {
-        //     return self.solve(board);
-        } else {
+        self.cells_with_candidates = board.cells.iter()
+            .filter(|cell| board.candidates[*cell].len() > 1)
+            .cloned()
+            .collect();
+
+        // Loop through rules
+        loop {
+            println!("Candidates: {:?}", board.candidates);
+            let mut changes_made = false;
+
+            // Try to apply each rule in turn.
+            if self.apply_basic_rules(board) {
+                changes_made = true; 
+            }
+            if self.apply_intermediate_rules(board) {
+                changes_made = true;  
+            }
+            // if self.apply_complex_rules(board) {
+            //     changes_made = true;  
+            // }
+            if !changes_made {
+                break;
+            }
             if self.solved(board) {
-                // Update self.board to be equivalent to the candidate board
-                for row in 0..9 {
-                    for col in 0..9 {
-                        let cell = utils::coords_to_cell(row, col);
-                        let candidates = board.candidates.get(&cell).unwrap().clone();
-                        if candidates.len() == 1 {
-                            board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
-                        }
+                break;
+            }
+        }
+    
+        // If board is solved, update it
+        if self.solved(board) {           
+            // Update self.board to be equivalent to the candidate board
+            for row in 0..9 {
+                for col in 0..9 {
+                    let cell = utils::coords_to_cell(row, col);
+                    let candidates = board.candidates.get(&cell).unwrap().clone();
+                    if candidates.len() == 1 {
+                        board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
                     }
                 }
-                return true;
-            } else {
-                let mut brute_force_solver = BruteForceSolver;
-                return brute_force_solver.solve(board);
             }
+            println!("Rule-based solver finished.");
+            return true;
+        }
+    
+        // If board is not solved, apply brute force solver
+        else {
+            let mut brute_force_solver = BruteForceSolver;
+            return brute_force_solver.solve(board);
         }
     }
 
     fn name(&self) -> String {
         "Rule Based Solver".to_string()
     }
+
+    fn initialize_candidates(&mut self, board: &mut Sudoku) {
+        board.initialize_candidates();
+        println!("Candidates: {:?}", board.candidates);
+    }
 }
 
 impl RuleBasedSolver {
     pub fn new() -> RuleBasedSolver {
-        RuleBasedSolver
+        RuleBasedSolver{
+            cells_with_candidates: Vec::new()
+        }
     }
     
     fn apply_basic_rules(&self, board: &mut Sudoku) -> bool {
@@ -500,126 +549,168 @@ impl RuleBasedSolver {
         // Returns true if a rule could be applied, false otherwise
         // When any rule succeeds, call the solver again
 
-        // if self.naked_single(board) {
-        //     return true;
-        // }
+        let mut applied = false;
+
+        if self.naked_single(board) {
+            println!("Naked single applied");
+            applied = true;
+        }
         if self.hidden_single(board) {
-            return true;
+            println!("Hidden single applied");
+            applied = true;
         }
         if self.naked_pair(board) {
-            return true;
+            println!("Naked pair applied");
+            applied = true;
         }
         if self.hidden_pair(board) {
-            return true;
+            println!("Hidden pair applied");
+            applied = true;
         }
-        false
+        applied
     }
 
     fn apply_intermediate_rules(&self, board: &mut Sudoku) -> bool {
         // Apply intermediate rules here: Locked Candidates Type 1 and Type 2
         // Returns true if a rule could be applied, false otherwise
 
+        let mut applied = false;
+
         if self.locked_candidates_type_1(board) {
-            return true;
+            println!("Locked candidates type 1 applied");
+            applied = true;
         }
         if self.locked_candidates_type_2(board) {
-            return true;
+            println!("Locked candidates type 2 applied");
+            applied = true;
         }
-        false
+        applied
     }
 
     // fn apply_complex_rules(&self, board: &mut Sudoku) -> bool {
     //     // Apply complex rules here: X-Wing, Swordfish
     //     // Returns true if a rule could be applied, false otherwise
 
+    //     let mut applied = false;
+
     //     if self.x_wing(board) {
-    //         return true;
+    //         applied = true;
     //     }
     //     if self.swordfish(board) {
-    //         return true;
+    //         applied = true;
     //     }
-    //     false
+    //     applied
     // }
 
     fn solved(&self, board: &Sudoku) -> bool {
         // Check if the board is solved by verifying that every cell has exactly one candidate
-        for row in 0..9 {
-            for col in 0..9 {
-                let cell = utils::coords_to_cell(row, col);
-                if let Some(candidates) = board.candidates.get(&cell) {
-                    if candidates.len() != 1 {
-                        return false;
-                    }
-                }
+        for cell in board.candidates.keys() {
+            if board.candidates.get(cell).unwrap().len() != 1 {
+                return false;
             }
         }
         true
     }
 
     // Basic rules: Naked Single, Hidden Single, Naked Pair, Hidden Pair
-    
-    // fn naked_single(&self, board: &mut Sudoku) -> bool {
-    //     for (cell, candidates) in board.candidates.iter() {
-    //         if candidates.len() == 1 {
-    //             let val = *candidates.iter().next().unwrap();
-    //             if !board.assign(cell, val) {
-    //                 panic!("Contradiction encountered during naked single");
-    //             }
-    //             return true;
-    //         }
-    //     }
-    //     false
-    // }
+
+    fn naked_single(&self, board: &mut Sudoku) -> bool {
+        let mut found = false; // flag for finding a naked single
+        for cell in board.cells.clone().iter() {
+            if board.candidates[cell].len() > 1 {
+                continue;
+            }
+            for digit in board.candidates[cell].clone() {
+                if !board.assign(cell, digit) {
+                    panic!("Contradiction encountered during naked single");
+                }
+            }
+            found = true; // mark that a naked single has been found
+        }
+        found
+    }
 
     fn hidden_single(&self, board: &mut Sudoku) -> bool {
-        // Get keys first without holding reference to board
-        let keys: Vec<String> = board.peers.keys().cloned().collect();
-    
-        for cell in keys {
-            for digit in 1..=9 {
-                // get all squares with that digit
-                let digit_occurrences: Vec<_> = board.candidates[&cell].iter()
-                    .filter(|&digit2| *digit2 == digit)
-                    .collect();
-                if digit_occurrences.len() == 1 {
+        let mut found = false;
+        // For each cell on the board that has more than one candidate
+        for cell in &self.cells_with_candidates {
+            // For each digit in candidates
+            for digit in board.candidates[cell].clone() {
+
+                // Check the digit's occurrence in row peers
+                if self.not_in_peers(board, &board.row_peers[cell], digit) {
                     if !board.assign(&cell, digit) {
                         panic!("Contradiction encountered during hidden single");
                     }
-                    return true;
+                    found = true;
+                }
+                // Check the digit's occurrence in column peers
+                else if self.not_in_peers(board, &board.col_peers[cell], digit) {
+                    if !board.assign(&cell, digit) {
+                        panic!("Contradiction encountered during hidden single");
+                    }
+                    found = true;
+                }
+                // Check the digit's occurrence in box peers
+                else if self.not_in_peers(board, &board.box_peers[cell], digit) {
+                    if !board.assign(&cell, digit) {
+                        panic!("Contradiction encountered during hidden single");
+                    }
+                    found = true;
                 }
             }
         }
-        false
+        found
     }
     
+    // Helper function to check if a digit isn't in peers
+    fn not_in_peers(&self, board:&Sudoku, peers: &HashSet<String>, digit: usize) -> bool {
+        let peers_with_digit: Vec<&String> = peers.iter()
+            .filter(|&peer| board.candidates[peer].contains(&digit))
+            .collect();
+        peers_with_digit.len() == 0
+    }
 
     fn naked_pair(&self, board: &mut Sudoku) -> bool {
-        for (cell) in &board.squares {
+        let mut found = false;
+        for cell in &self.cells_with_candidates {
             let candidates = board.candidates[cell].clone();
+            // If there are more than two candidates, we can't have a naked pair
             if candidates.len() != 2 {
                 continue;
             }
-            for unit in vec![&board.row_peers[cell], &board.col_peers[cell], &board.box_peers[cell]] {
+            for unit in vec![&board.row_peers[cell].clone(), &board.col_peers[cell].clone(), &board.box_peers[cell].clone()] {
+                // Find other cells in the unit that have the same two candidates
                 let other_cells: Vec<_> = unit.iter()
                     .filter(|&cell2| *cell2 != *cell && board.candidates[cell2] == candidates)
                     .cloned()
                     .collect();
-                if other_cells.len() == 1 {
-                    for digit in candidates {
-                        if !board.eliminate(&other_cells[0], digit) {
-                            panic!("Contradiction encountered during naked pair");
+                // If there's exactly one cell with the same two candidates, we have a naked pair
+                if other_cells.len() != 1 {
+                    continue;
+                }
+                // Eliminate the two digits from all other cells in the unit
+                for cell_to_update in unit {
+                    if cell_to_update != cell && cell_to_update != &other_cells[0] {
+                        for digit in &candidates {
+                            if !board.eliminate(cell_to_update, *digit) {
+                                panic!("Contradiction encountered during naked pair");
+                            }
+                            else{
+                                found = true;
+                            }
                         }
                     }
-                    return true;
                 }
             }
         }
-        false
+        found
     }
     
     fn hidden_pair(&self, board: &mut Sudoku) -> bool {
-        for (cell) in board.squares.clone() {
-            for unit in vec![&board.row_peers[&cell], &board.col_peers[&cell], &board.box_peers[&cell]] {
+        let mut found = false;
+        for cell in &self.cells_with_candidates {
+            for unit in vec![board.row_peers[cell].clone(), board.col_peers[cell].clone(), board.box_peers[cell].clone()] {
                 for digit1 in 1..9 {
                     for digit2 in (digit1 + 1)..10 {
                         let cells_with_digits: Vec<_> = unit.iter()
@@ -627,29 +718,31 @@ impl RuleBasedSolver {
                             .cloned() // Clone the cells to avoid borrowing `board`
                             .collect();
                         if cells_with_digits.len() == 2 && cells_with_digits.contains(&cell) {
-                            for digit in board.candidates[&cell].clone() {
+                            for digit in board.candidates[cell].clone() {
                                 if digit != digit1 && digit != digit2 {
                                     if !board.eliminate(&cell, digit) {
                                         panic!("Contradiction encountered during hidden pair");
                                     }
                                 }
                             }
-                            return true;
+                            found = true;
                         }
                     }
                 }
             }
         }
-        false
+        found
     }
     
 // Locked Candidates Type 1:
 fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
-    for square in &board.squares {
-        for unit in vec![&board.row_peers[square].clone(), &board.col_peers[square].clone(), &board.box_peers[square].clone()] {
+    let mut found = false;
+    // For each cell on the board that has more than one candidate
+    for cell in &self.cells_with_candidates {
+        for unit in vec![&board.row_peers[cell].clone(), &board.col_peers[cell].clone(), &board.box_peers[cell].clone()] {
             for digit in 1..=9 {
                 let candidate_cells: Vec<_> = unit.iter()
-                    .filter(|&cell| board.candidates[cell].contains(&digit))//filter(|&&cell| board.candidates[&cell].contains(&digit))
+                    .filter(|&cell| board.candidates[cell].contains(&digit))
                     .collect();
 
                 if candidate_cells.is_empty() {
@@ -662,32 +755,41 @@ fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
                 if rows.len() == 1 {
                     let row = rows.into_iter().next().unwrap();
                     for cell in unit {
+                        if board.candidates[cell].len() == 1 {
+                            continue;
+                        }
                         if cell.starts_with(row) && !candidate_cells.contains(&cell) && board.candidates[cell].contains(&digit) {
                             board.eliminate(cell, digit);
-                            return true;
+                            found = true;
                         }
                     }
                 } else if cols.len() == 1 {
                     let col = cols.into_iter().next().unwrap();
                     for cell in unit {
+                        if board.candidates[cell].len() == 1 {
+                            continue;
+                        }
                         if cell.ends_with(col) && !candidate_cells.contains(&cell) && board.candidates[cell].contains(&digit) {
-                            board.eliminate(cell, digit);
-                            return true;
+                            if !board.eliminate(cell, digit) {
+                                panic!("Contradiction encountered during locked candidates type 1");
+                            }
+                            else {found = true;}
                         }
                     }
                 }
             }
         }
     }
-    false
+    found
 }
 
 // Function to implement the Locked Candidates Type 2 rule
 fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
-    // Iterate over each square on the Sudoku board
-    for square in &board.squares {
-        // For each square, consider the row and column peers 
-        for unit in vec![&board.row_peers[square], &board.col_peers[square]] {
+    let mut found = false;
+    // For each cell on the board that has more than one candidate
+    for cell in &self.cells_with_candidates {
+        // For each cell, consider the row and column peers 
+        for unit in vec![board.row_peers[cell].clone(), board.col_peers[cell].clone()] {
             // Check for each digit from 1 to 9
             for digit in 1..=9 {
                 // Find the cells in the current unit (row or column) that contain the digit as a candidate
@@ -702,27 +804,37 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
 
                 // Check if all candidate cells are in the same box
                 let peers = &board.box_peers[candidate_cells[0]].clone();
-                for &cell in &candidate_cells {
-                    if !peers.contains(&cell.clone()) {
-                        continue;
+                let mut all_in_same_box = true;
+                for &cell in &candidate_cells[1..] {
+                    if !peers.contains(cell) {
+                        all_in_same_box = false;
+                        break;
                     }
                 }
 
+                if !all_in_same_box {
+                    continue;
+                }
                 // If all candidates are in a single box, get that box
                 // Then in that box, eliminate the digit from the cells that are not in the row or column
                 for cell in peers {
+                    if board.candidates[cell].len() == 1 {
+                        continue;
+                    }
                     if !candidate_cells.contains(&cell) && board.candidates[cell].contains(&digit) {
-                        // If this elimination leads to a contradiction, then the Sudoku is invalid.
-                        // If not, then the elimination is made and the function returns true indicating that progress was made.
-                        board.eliminate(cell, digit);
-                        return true;
+                        if !board.eliminate(cell, digit) {
+                            println!("{:?}", cell);
+                            println!("{:?}", digit);
+                            panic!("Contradiction encountered during locked candidates type 2");
+                        }
+                        else {found = true;}
                     }
                 }
             }
         }
     }
     // If no elimination was possible, the function returns false indicating that no progress was made.
-    false
+    found
 }
 
 
@@ -910,18 +1022,23 @@ impl Solver for StochasticSolver {
 
             self.cool_down();
         }
+        println!("Stochastic solver finished.");
         score == -243
     }
 
     fn name(&self) -> String {
         format!("Stochastic (T={}, cooling={})", self.temperature, self.cooling_factor)
     }
+
+    fn initialize_candidates(&mut self, _board: &mut Sudoku) {
+        // unneeded
+    }
 } 
 
 impl StochasticSolver {
-    pub fn new(temperature: f64, cooling_factor: f64, board: &Sudoku) -> Self {
-        let units: Vec<Vec<String>> = board.squares.iter()
-            .flat_map(|square| vec![board.row_peers[square].clone(), board.col_peers[square].clone(), board.box_peers[square].clone()])
+    pub fn new(temperature: f64, cooling_factor: f64, board: Sudoku) -> Self {
+        let units: Vec<Vec<String>> = board.cells.iter()
+            .flat_map(|cell| vec![board.row_peers[cell].clone(), board.col_peers[cell].clone(), board.box_peers[cell].clone()])
             .map(|unit| unit.iter().cloned().collect())
             .collect();
 
