@@ -894,7 +894,7 @@ impl Solver for StochasticSolver {
         }
 
         let mut score = self.score(board);
-        while score > -162 {
+        while score > -243 {
             let old_board = board.clone();
             let old_score = score;
 
@@ -910,7 +910,7 @@ impl Solver for StochasticSolver {
 
             self.cool_down();
         }
-        score == -162
+        score == -243
     }
 
     fn name(&self) -> String {
@@ -957,6 +957,15 @@ impl StochasticSolver {
             let column: [u8; 9] = (0..9).map(|j| board.board[j][i]).collect::<Vec<u8>>().try_into().unwrap();
             score -= Sudoku::unique_elements(row) + Sudoku::unique_elements(column);
         }
+        // New box checking section
+        for box_x in 0..3 {
+            for box_y in 0..3 {
+                let box_values: [u8; 9] = (0..9)
+                    .map(|i| board.board[box_x*3 + i/3][box_y*3 + i%3])
+                    .collect::<Vec<u8>>().try_into().unwrap();
+                score -= Sudoku::unique_elements(box_values);
+            }
+        }
         println!("Score: {}", score);
         score
     }
@@ -973,6 +982,7 @@ impl StochasticSolver {
             println!("u: {}", u);
             println!("delta_s: {}", delta_s);
             println!("temperature: {}", self.temperature);
+            println!("exp: {}", (delta_s as f64 / self.temperature).exp());
             (delta_s as f64 / self.temperature).exp() < u
         }
     }
