@@ -9,7 +9,7 @@ mod utils;
 
 use crate::sudoku::{Sudoku, BruteForceSolver,
     // CSPSolver,
-    RuleBasedSolver, StochasticSolver, Solver};
+    RuleBasedSolver, StochasticSolver, CSPSolver, Solver};
 
 fn main() {
     let mut writer = Writer::from_path("./data/output.csv").unwrap();
@@ -26,9 +26,9 @@ fn main() {
 
     // Instantiate the solvers using the first puzzle
     let mut solvers: Vec<Box<dyn Solver>> = vec![
-        Box::new(BruteForceSolver::new()),
+        // Box::new(BruteForceSolver::new()),
         Box::new(RuleBasedSolver::new()),
-        Box::new(StochasticSolver::new(10000.0, 0.999, first_sudoku.clone())),
+        // Box::new(StochasticSolver::new(10000.0, 0.999, first_sudoku.clone())),
     ];
 
     // Re-instantiate the BufReader

@@ -171,6 +171,38 @@ impl Sudoku {
         }
     }
 
+            // // If the digit is not a candidate, we do nothing and return true
+        // if !self.candidates[cell].contains(&digit) {
+        //     return true;
+        // }
+        // // If the digit has more than one candidate, we remove it from the candidates of the cell
+        // if self.candidates[cell].len() > 1 {
+        //     self.candidates.get_mut(cell).unwrap().remove(&digit);
+        //     println!("Eliminated {} from {}", digit, cell);
+        //     println!("Candidates for {} are now {:?}", cell, self.candidates[cell]);
+        // }
+        
+        // // If the cell has no remaining candidates, we return false to signal a contradiction
+        // if self.candidates[cell].is_empty() {
+        //     println!("Contradiction: {} has no candidates left", cell);
+        //     return false;
+        // } 
+        // // If the cell has one remaining candidate, we need to eliminate this digit from all peers
+        // else if self.candidates[cell].len() == 1 {
+        //     let d2 = *self.candidates[cell].iter().next().unwrap();
+        
+        //     // Get a copy of peers before we start mutating `self`
+        //     let peers = self.peers[cell].clone();
+        
+        //     // If elimination from any peer results in a contradiction, we return false
+        //     for s2 in peers.iter() {
+        //         if !self.eliminate(s2, d2) {
+        //             println!("Elimination of {} from {} resulted in a contradiction", d2, s2);
+        //             return false;
+        //         }
+        //     }
+        // }
+
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
         // other_values is a set of digits that are not equal to the assigned digit
         let mut other_values: HashSet<usize> = self.candidates[cell].clone();
@@ -184,60 +216,66 @@ impl Sudoku {
         }
         true
     }
+    
+
 
 
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
-        // If the digit is not a candidate, we do nothing and return true
-        if !self.candidates[cell].contains(&digit) {
-            return true;
-        }
-        // If the digit has more than one candidate, we remove it from the candidates of the cell
-        if self.candidates[cell].len() > 1 {
-            self.candidates.get_mut(cell).unwrap().remove(&digit);
-            println!("Eliminated {} from {}", digit, cell);
-            println!("Candidates for {} are now {:?}", cell, self.candidates[cell]);
-        }
-        
-        // If the cell has no remaining candidates, we return false to signal a contradiction
-        if self.candidates[cell].is_empty() {
-            println!("Contradiction: {} has no candidates left", cell);
-            return false;
-        } 
-        // If the cell has one remaining candidate, we need to eliminate this digit from all peers
-        else if self.candidates[cell].len() == 1 {
-            let d2 = *self.candidates[cell].iter().next().unwrap();
-        
-            // Get a copy of peers before we start mutating `self`
-            let peers = self.peers[cell].clone();
-        
-            // If elimination from any peer results in a contradiction, we return false
-            for s2 in peers.iter() {
-                if !self.eliminate(s2, d2) {
-                    println!("Elimination of {} from {} resulted in a contradiction", d2, s2);
-                    return false;
-                }
+        let mut tasks = vec![(cell.to_string(), digit)];
+    
+        while let Some((cell, digit)) = tasks.pop() {
+            // If the digit is not a candidate, we do nothing and continue with the next task
+            if !self.candidates[&cell].contains(&digit) {
+                continue;
             }
-        }
-        
-        
-        // Finally, we ensure that for every unit of the cell, the digit has at least one place it can be
-        // check row, column and box
-        let units = vec![self.row_peers[cell].clone(), self.col_peers[cell].clone(), self.box_peers[cell].clone()];
-        for unit in units.iter() {
-            let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).cloned().collect();
-            // If not, we return false to signal a contradiction
-            if d_places.is_empty() {
+            // If the digit has more than one candidate, we remove it from the candidates of the cell
+            if self.candidates[&cell].len() > 1 {
+                self.candidates.get_mut(&cell).unwrap().remove(&digit);
+                println!("Eliminated {} from {}", digit, cell);
+                println!("Candidates for {} are now {:?}", cell, self.candidates[&cell]);
+                println!("Candidates of board are now {:?}", self.candidates);
+                println!("Peers of cell are {:?}", self.peers[&cell]);
+            }
+            // If the cell has no remaining candidates, we return false to signal a contradiction
+            if self.candidates[&cell].is_empty() {
+                println!("Contradiction: {} has no candidates left", cell);
                 return false;
-            } 
-            // If there is only one such place, we assign the digit there
-            else if d_places.len() == 1 {
-                if !self.assign(&d_places[0], digit) {
+            }
+            // If the cell has one remaining candidate, we need to eliminate this digit from all peers
+            else if self.candidates[&cell].len() == 1 {
+                let d2 = *self.candidates[&cell].iter().next().unwrap();
+    
+                // Get a copy of peers before we start mutating `self`
+                let peers = self.peers[&cell].clone();
+    
+                // Instead of recursively calling eliminate, add the peers to the task list
+                for s2 in peers.iter() {
+                    tasks.push((s2.clone(), d2));
+                }
+            }
+    
+            // Ensure that for every unit of the cell, the digit has at least one place it can be
+            let units = vec![self.row_peers[&cell].clone(), self.col_peers[&cell].clone(), self.box_peers[&cell].clone()];
+            for unit in units.iter() {
+                let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).cloned().collect();
+                // If not, we return false to signal a contradiction
+                if d_places.is_empty() {
+                    println!("Contradiction: {:?} has no place for {}", unit, digit);
                     return false;
+                } 
+                // If there is only one such place, we assign the digit there
+                else if d_places.len() == 1 {
+                    println!("Only one place for {} in {:?}: {}", digit, unit, d_places[0]);
+                    if !self.assign(&d_places[0], digit) {
+                        println!("Assigning {} to {} resulted in a contradiction", digit, d_places[0]);
+                        return false;
+                    }
                 }
             }
         }
-        return true;
+        true
     }
+        
 
     // Check if a given number is valid in a given cell
     // Check directly on the board. If the cell is 0, check if the number is valid
@@ -390,82 +428,89 @@ impl BruteForceSolver {
 
 // Constraint programming with forward propagation and backtracking.
 
-// pub struct CSPSolver<T> {
-//     // Store eliminated values for each cell to allow for backtracking
-//     assignments: HashMap<Cell<T>, HashSet<usize>>,
-// }
+pub struct CSPSolver {
+    queue: Vec<String>
+}
 
-// impl CSPSolver {
-//     // Constructor for CSPSolver
-//     pub fn new() -> Self {
-//         Self {
-//             assignments: HashMap::new(),
-//         }
-//     }
-
-//     // Function to find the first unassigned variable
-//     fn select_unassigned_variable(&self, board: &Sudoku) -> Cell<T> {
-//         for row in 0..9 {
-//             for col in 0..9 {
-//                 let cell = Cell { row, col };
-//                 if board.board[row][col] == 0 {
-//                     return cell;
-//                 }
-//             }
-//         }
-//         panic!("No unassigned variable found");
-//     }
-
-//     // Function to unassign a variable
-//     fn unassign(&mut self, board: &mut Sudoku, cell: &Cell<T>, digit: usize) {
-//         // Remove digit from the assignments of the cell
-//         self.assignments.get_mut(cell).unwrap().remove(&digit);
-
-//         // Add digit back to the candidates of the cell
-//         board.candidates.get_mut(cell).unwrap().insert(digit);
-//     }
-// }
+impl CSPSolver {
+    // Constructor for CSPSolver
+    pub fn new() -> Self {
+        CSPSolver {
+            queue: Vec::new()
+        }
+    }
+}
 
 
-// impl Solver for CSPSolver {
-//     fn solve(&mut self, board: &mut Sudoku) -> bool {
-//         // If all variables are assigned, check if the solution is consistent
-//         if board.is_complete() {
-//             return board.is_valid();
-//         }
+impl Solver for CSPSolver {
+    fn solve(&mut self, board: &mut Sudoku) -> bool {
+        // 1. only iterate over candidates
+        // 2. we should probably propagate the information, which means use assign and eliminate
+        // 3. priority queue for candidates
+        // 4. backtrack?
+        
+        // iterate over candidates with Breadth First Search:
+        // 1. get the cell with the least candidates
+        // 2. try to assign each candidate
+        // 3. if it works, add the cell to the queue
+        // 4. if it doesn't work, backtrack
+        // 5. if the queue is empty, return false
+            
+        let mut depth = 1;
+        while !self.queue.is_empty() {
+            let mut counter = 0;
+            for cell in self.queue.clone().iter() {
+                while counter < depth {
+                    let mut stack = Vec::new();
+                    let board_copy = board.board.clone();  // Make a copy of the board
+                    for digit in board.candidates[cell].clone().iter() {
+                        if !board.assign(&self.queue[0], *digit){
+                            stack.push(*digit);
+                            board.board = board_copy;  // Revert the board
+                            if !board.eliminate(&self.queue[0], *digit) {
+                                // big problem...
+                                self.queue.pop();
+                                board.board = board_copy;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                    counter += 1;
+                    if stack.len() != 0 {
+                        self.queue.pop();
+                    }
+                    else{
+                        break;
+                    }
+                }
+            }
+            depth += 1;
+        }
+        true
+    }
 
-//         // Get the next variable V to assign
-//         let cell = self.select_unassigned_variable(board);
+    fn name(&self) -> String {
+        "Constraint Programming Solver".to_string()
+    }
 
-//         // Iterate over the domain of V
-//         for digit in board.candidates[&cell].iter() {
-//             if board.is_valid_assignment(&cell, *digit) {
-//                 // Assign the value to V
-//                 board.assign(&cell, *digit);
-//                 self.assignments.get_mut(&cell).unwrap().insert(*digit);
+    fn initialize_candidates(&mut self, board: &mut Sudoku) {
+        board.initialize_candidates();
 
-//                 // Recursively call solve to continue to the next variable
-//                 if self.solve(board) {
-//                     return true;
-//                 }
+        // Priority queue for candidates
+        // cells must have more than 1 candidate
+        // and be sorted by the number of candidates
+        self.queue = board.cells.iter()
+            .filter(|cell| board.candidates[*cell].len() > 1)
+            .cloned()
+            .collect();
 
-//                 // Unassign the value from V (backtracking step)
-//                 self.unassign(board, &cell, *digit);
-//             }
-//         }
+        // sort by number of candidates (value, ascending)
+        self.queue.sort_by_key(|cell| board.candidates[cell].len());
 
-//         return false;
-//     }
-
-//     fn name(&self) -> String {
-//         "Constraint Programming Solver".to_string()
-//     }
-
-//     fn initialize_candidates(&mut self, sudoku: &mut Sudoku) {
-//         board.initialize_candidates();
-//         println!("Candidates: {:?}", board.candidates);
-//     }
-// }
+        println!("Candidates: {:?}", board.candidates);
+    }
+}
 
 
 pub struct RuleBasedSolver{
@@ -483,6 +528,7 @@ impl Solver for RuleBasedSolver {
 
         // Loop through rules
         loop {
+            let boardcopy = board.board.clone();
             println!("Candidates: {:?}", board.candidates);
             let mut changes_made = false;
 
@@ -499,7 +545,12 @@ impl Solver for RuleBasedSolver {
             if !changes_made {
                 break;
             }
-            if self.solved(board) {
+            // if self.solved(board) {
+            //     break;
+            // }
+
+            // if boardcopy is the same as the board then no changes were made and we can break
+            if boardcopy == board.board {
                 break;
             }
         }
@@ -788,8 +839,12 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
     let mut found = false;
     // For each cell on the board that has more than one candidate
     for cell in &self.cells_with_candidates {
+        let mut row_inclusive = board.row_peers[cell].clone();
+        let mut col_inclusive = board.col_peers[cell].clone();
+        row_inclusive.insert(cell.to_string());
+        col_inclusive.insert(cell.to_string());
         // For each cell, consider the row and column peers 
-        for unit in vec![board.row_peers[cell].clone(), board.col_peers[cell].clone()] {
+        for unit in vec![row_inclusive, col_inclusive] {
             // Check for each digit from 1 to 9
             for digit in 1..=9 {
                 // Find the cells in the current unit (row or column) that contain the digit as a candidate
@@ -804,6 +859,7 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
 
                 // Check if all candidate cells are in the same box
                 let peers = &board.box_peers[candidate_cells[0]].clone();
+                // peers.insert(candidate_cells[0].to_string());
                 let mut all_in_same_box = true;
                 for &cell in &candidate_cells[1..] {
                     if !peers.contains(cell) {
@@ -815,6 +871,11 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
                 if !all_in_same_box {
                     continue;
                 }
+
+                // println!("Candidate cells length: {}", candidate_cells.len());
+                // println!("Candidate cells: {:?}", candidate_cells);
+                // println!("Unit: {:?}", unit);
+                // println!("Peers: {:?}", peers);
                 // If all candidates are in a single box, get that box
                 // Then in that box, eliminate the digit from the cells that are not in the row or column
                 for cell in peers {
@@ -827,7 +888,10 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
                             println!("{:?}", digit);
                             panic!("Contradiction encountered during locked candidates type 2");
                         }
-                        else {found = true;}
+                        else {
+                            println!("STOP");
+                            found = true;
+                        }
                     }
                 }
             }
@@ -955,6 +1019,7 @@ pub struct StochasticSolver {
     temperature: f64,
     cooling_factor: f64,
     units: Vec<Vec<String>>,
+    counter: usize,
 }
 
 // Uses stochastic search with simulated annealing.
@@ -1006,7 +1071,7 @@ impl Solver for StochasticSolver {
         }
 
         let mut score = self.score(board);
-        while score > -243 {
+        while score > -243 && self.counter < 1000000 {
             let old_board = board.clone();
             let old_score = score;
 
@@ -1019,7 +1084,6 @@ impl Solver for StochasticSolver {
                 *board = old_board;
                 score = old_score;
             }
-
             self.cool_down();
         }
         println!("Stochastic solver finished.");
@@ -1042,16 +1106,19 @@ impl StochasticSolver {
             .map(|unit| unit.iter().cloned().collect())
             .collect();
 
+        let counter = 0;
+
         StochasticSolver { 
             temperature, 
             cooling_factor,
             units,
+            counter
         }
     }
 
     // First get a random unit,
     // Then get two random cells within that unit, and swap their values.
-    fn swap_random(&self, board: &mut Sudoku) {
+    fn swap_random(&mut self, board: &mut Sudoku) {
         println!("Swapping random!");
         println!("Board: {:?}", board.board);
         let unit_index = rand::thread_rng().gen_range(0..self.units.len());
@@ -1065,6 +1132,7 @@ impl StochasticSolver {
         let temp = board.board[coords_i.0][coords_i.1];
         board.board[coords_i.0][coords_i.1] = board.board[coords_j.0][coords_j.1];
         board.board[coords_j.0][coords_j.1] = temp;
+        self.counter += 1;
     }
 
     fn score(&self, board: &Sudoku) -> i32 {
