@@ -27,8 +27,8 @@ fn main() {
     // Instantiate the solvers using the first puzzle
     let mut solvers: Vec<Box<dyn Solver>> = vec![
         // Box::new(BruteForceSolver::new()),
-        // Box::new(RuleBasedSolver::new()),
-        Box::new(CSPSolver::new()),
+        Box::new(RuleBasedSolver::new()),
+        // Box::new(CSPSolver::new()),
         // Box::new(StochasticSolver::new(10000.0, 0.999, first_sudoku.clone())),
     ];
 

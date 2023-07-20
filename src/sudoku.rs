@@ -624,6 +624,14 @@ impl Solver for RuleBasedSolver {
         // If board is not solved, apply brute force solver
         else {
             let mut csp_solver = CSPSolver::new();
+
+            // Priority queue for candidates
+            csp_solver.queue = board.cells.iter()
+                .filter(|cell| board.candidates[*cell].len() > 1)
+                .cloned()
+                .collect();
+            csp_solver.queue.sort_by_key(|cell| board.candidates[cell].len());
+
             return csp_solver.solve(board);
         }
     }
@@ -816,24 +824,27 @@ impl RuleBasedSolver {
                     for digit2 in (digit1 + 1)..10 {
                         let cells_with_digits: Vec<_> = unit.iter()
                             .filter(|&cell2| board.candidates[cell2].contains(&digit1) || board.candidates[cell2].contains(&digit2))
-                            .cloned() // Clone the cells to avoid borrowing `board`
+                            .cloned()
                             .collect();
                         if cells_with_digits.len() == 2 && cells_with_digits.contains(&cell) {
-                            for digit in board.candidates[cell].clone() {
-                                if digit != digit1 && digit != digit2 {
-                                    if !board.eliminate(&cell, digit) {
-                                        panic!("Contradiction encountered during hidden pair");
+                            let other_cell = cells_with_digits.iter().find(|&cell2| cell2 != cell).unwrap();
+                            if board.candidates[other_cell].contains(&digit1) && board.candidates[other_cell].contains(&digit2) {
+                                for digit in board.candidates[cell].clone() {
+                                    if digit != digit1 && digit != digit2 {
+                                        if !board.eliminate(&cell, digit) {
+                                            panic!("Contradiction encountered during hidden pair");
+                                        }
                                     }
                                 }
+                                found = true;
                             }
-                            found = true;
                         }
                     }
                 }
             }
         }
         found
-    }
+    }    
     
 // Locked Candidates Type 1:
 fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
