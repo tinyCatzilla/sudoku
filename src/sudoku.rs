@@ -204,6 +204,7 @@ impl Sudoku {
         // }
 
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
+        println!("Assigning {} to {}", digit, cell);
         // other_values is a set of digits that are not equal to the assigned digit
         let mut other_values: HashSet<usize> = self.candidates[cell].clone();
         other_values.remove(&digit);
@@ -221,6 +222,7 @@ impl Sudoku {
 
 
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
+        println!("Eliminating {} from {}", digit, cell);
         let mut tasks = vec![(cell.to_string(), digit)];
     
         while let Some((cell, digit)) = tasks.pop() {
@@ -231,10 +233,10 @@ impl Sudoku {
             // If the digit has more than one candidate, we remove it from the candidates of the cell
             if self.candidates[&cell].len() > 1 {
                 self.candidates.get_mut(&cell).unwrap().remove(&digit);
-                println!("Eliminated {} from {}", digit, cell);
-                println!("Candidates for {} are now {:?}", cell, self.candidates[&cell]);
-                println!("Candidates of board are now {:?}", self.candidates);
-                println!("Peers of cell are {:?}", self.peers[&cell]);
+                // println!("Eliminated {} from {}", digit, cell);
+                // println!("Candidates for {} are now {:?}", cell, self.candidates[&cell]);
+                // println!("Candidates of board are now {:?}", self.candidates);
+                // println!("Peers of cell are {:?}", self.peers[&cell]);
             }
             // If the cell has no remaining candidates, we return false to signal a contradiction
             if self.candidates[&cell].is_empty() {
@@ -265,7 +267,7 @@ impl Sudoku {
                 } 
                 // If there is only one such place, we assign the digit there
                 else if d_places.len() == 1 {
-                    println!("Only one place for {} in {:?}: {}", digit, unit, d_places[0]);
+                    // println!("Only one place for {} in {:?}: {}", digit, unit, d_places[0]);
                     if !self.assign(&d_places[0], digit) {
                         println!("Assigning {} to {} resulted in a contradiction", digit, d_places[0]);
                         return false;
@@ -439,55 +441,99 @@ impl CSPSolver {
             queue: Vec::new()
         }
     }
+
+    fn solved(&self, board: &Sudoku) -> bool {
+        // Check if the board is solved by verifying that every cell has exactly one candidate
+        for cell in board.candidates.keys() {
+            if board.candidates.get(cell).unwrap().len() != 1 {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 
 impl Solver for CSPSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
-        // 1. only iterate over candidates
-        // 2. we should probably propagate the information, which means use assign and eliminate
-        // 3. priority queue for candidates
-        // 4. backtrack?
-        
-        // iterate over candidates with Breadth First Search:
-        // 1. get the cell with the least candidates
-        // 2. try to assign each candidate
-        // 3. if it works, add the cell to the queue
-        // 4. if it doesn't work, backtrack
-        // 5. if the queue is empty, return false
             
         let mut depth = 1;
-        while !self.queue.is_empty() {
-            let mut counter = 0;
+        println!("Depth: {}", depth);
+        println!("Queue: {:?}", self.queue);
+        while !self.solved(board) {
+            let mut counter = 1;
+            let mut index = 0;
             for cell in self.queue.clone().iter() {
-                while counter < depth {
-                    let mut stack = Vec::new();
-                    let board_copy = board.board.clone();  // Make a copy of the board
-                    for digit in board.candidates[cell].clone().iter() {
+                println!("Cell: {}", cell);
+                println!("Cell Candidates: {:?}", board.candidates[cell]);
+                let mut digitstack = Vec::new();
+                for digit in board.candidates[cell].clone().iter() {
+                    println!("Digit: {}", digit);
+                    while counter < depth {
+                        let candidates_copy: HashMap<String, HashSet<usize>> = board
+                            .candidates
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect();  // Make a copy of the board
+                        // println!("board.candidates at start of loop: {:?}", board.candidates);
+                        // println!("candidates_copy at start of loop: {:?}", candidates_copy);
                         if !board.assign(&self.queue[0], *digit){
-                            stack.push(*digit);
-                            board.board = board_copy;  // Revert the board
+                            println!("CSPSOLVER: Assigning {} to {} failed", digit, cell);
+                            digitstack.push(*digit);
+                            // println!("board.candidates before backtracking: {:?}", board.candidates);
+                            // println!("candidates_copy before backtracking: {:?}", candidates_copy);
+                            board.candidates = candidates_copy.clone();  // Revert the board
+                            // println!("board.candidates after backtracking: {:?}", board.candidates);
                             if !board.eliminate(&self.queue[0], *digit) {
                                 // big problem...
-                                self.queue.pop();
-                                board.board = board_copy;
-                                break;
+                                println!("CSPSOLVER: Eliminating {} from {} failed", digit, cell);
+                                board.candidates = candidates_copy;  // Revert the board
+                                return false;
                             }
+                            break;
                         }
-                        break;
+                        println!("CSPSOLVER: Assigning {} to {} succeeded", digit, cell);
+                        // digit is good, go one layer deeper.
+                        counter += 1;
+                        // println!("Counter: {}", counter);
                     }
-                    counter += 1;
-                    if stack.len() != 0 {
-                        self.queue.pop();
+                }
+                // println!("Digitstack: {:?}", digitstack);
+                // println!("Cell: {}", cell);
+                // if digitstack.len() != 0 {
+                //     println!("Popping!");
+                //     self.queue.pop();
+                // }
+                if board.candidates[cell].len() == 1 {
+                    self.queue.remove(index);
+                    if index != 0 {
+                        index -= 1;
                     }
-                    else{
-                        break;
-                    }
+                    break;
+                }
+                else{
+                index += 1;
                 }
             }
             depth += 1;
+            println!("Depth: {}", depth);
+            println!("Queue: {:?}", self.queue);
+            println!("Candidates: {:?}", board.candidates);
         }
-        true
+        // solved
+
+        // Update self.board to be equivalent to the candidate board
+        for row in 0..9 {
+            for col in 0..9 {
+                let cell = utils::coords_to_cell(row, col);
+                let candidates = board.candidates.get(&cell).unwrap().clone();
+                if candidates.len() == 1 {
+                    board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
+                }
+            }
+        }
+        println!("CSPsolver finished.");
+        return true;
     }
 
     fn name(&self) -> String {
@@ -528,7 +574,11 @@ impl Solver for RuleBasedSolver {
 
         // Loop through rules
         loop {
-            let boardcopy = board.board.clone();
+            let boardcopy: HashMap<String, HashSet<usize>> = board
+                .candidates
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();  // Make a copy of the board
             println!("Candidates: {:?}", board.candidates);
             let mut changes_made = false;
 
@@ -550,7 +600,7 @@ impl Solver for RuleBasedSolver {
             // }
 
             // if boardcopy is the same as the board then no changes were made and we can break
-            if boardcopy == board.board {
+            if boardcopy == board.candidates {
                 break;
             }
         }

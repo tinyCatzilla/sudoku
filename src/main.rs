@@ -27,12 +27,13 @@ fn main() {
     // Instantiate the solvers using the first puzzle
     let mut solvers: Vec<Box<dyn Solver>> = vec![
         // Box::new(BruteForceSolver::new()),
-        Box::new(RuleBasedSolver::new()),
+        // Box::new(RuleBasedSolver::new()),
+        Box::new(CSPSolver::new()),
         // Box::new(StochasticSolver::new(10000.0, 0.999, first_sudoku.clone())),
     ];
 
     // Re-instantiate the BufReader
-    let file = File::open("./data/easy.txt").unwrap();
+    let file = File::open("./data/hard.txt").unwrap();
     let reader = BufReader::new(file);
 
     // Ensure to process the first line as well
@@ -60,6 +61,7 @@ fn main() {
             writer.flush().unwrap();
         }
     }
+    println!("FINISHED!!");
 }
     
 
