@@ -33,7 +33,7 @@ fn main() {
     ];
 
     // Re-instantiate the BufReader
-    let file = File::open("./data/hard.txt").unwrap();
+    let file = File::open("./data/large.txt").unwrap();
     let reader = BufReader::new(file);
 
     // Ensure to process the first line as well

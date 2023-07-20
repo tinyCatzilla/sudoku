@@ -204,10 +204,11 @@ impl Sudoku {
         // }
 
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
-        println!("Assigning {} to {}", digit, cell);
+        // println!("Assigning {} to {}", digit, cell);
         // other_values is a set of digits that are not equal to the assigned digit
         let mut other_values: HashSet<usize> = self.candidates[cell].clone();
         other_values.remove(&digit);
+
         // We try to eliminate all other values from the cell
         for d2 in other_values {
             if !self.eliminate(cell, d2) {
@@ -217,15 +218,22 @@ impl Sudoku {
         }
         true
     }
-    
-
-
 
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
-        println!("Eliminating {} from {}", digit, cell);
+        // println!("Eliminating {} from {}", digit, cell);
+        // println!("Candidates for {} are {:?}", cell, self.candidates[cell]);
         let mut tasks = vec![(cell.to_string(), digit)];
+        let mut processed = HashSet::new();  // This set will track which tasks have been processed
     
-        while let Some((cell, digit)) = tasks.pop() {
+        while let Some(task) = tasks.pop() {
+            let (cell, digit) = task.clone();
+            // If the task has been processed before, skip it
+            if processed.contains(&task) {
+                continue;
+            }
+            // Otherwise, add it to the processed set
+            processed.insert(task);
+
             // If the digit is not a candidate, we do nothing and continue with the next task
             if !self.candidates[&cell].contains(&digit) {
                 continue;
@@ -269,7 +277,7 @@ impl Sudoku {
                 else if d_places.len() == 1 {
                     // println!("Only one place for {} in {:?}: {}", digit, unit, d_places[0]);
                     if !self.assign(&d_places[0], digit) {
-                        println!("Assigning {} to {} resulted in a contradiction", digit, d_places[0]);
+                        // println!("Assigning {} to {} resulted in a contradiction", digit, d_places[0]);
                         return false;
                     }
                 }
@@ -466,7 +474,6 @@ impl Solver for CSPSolver {
             for cell in self.queue.clone().iter() {
                 println!("Cell: {}", cell);
                 println!("Cell Candidates: {:?}", board.candidates[cell]);
-                let mut digitstack = Vec::new();
                 for digit in board.candidates[cell].clone().iter() {
                     println!("Digit: {}", digit);
                     while counter < depth {
@@ -479,7 +486,6 @@ impl Solver for CSPSolver {
                         // println!("candidates_copy at start of loop: {:?}", candidates_copy);
                         if !board.assign(&self.queue[0], *digit){
                             println!("CSPSOLVER: Assigning {} to {} failed", digit, cell);
-                            digitstack.push(*digit);
                             // println!("board.candidates before backtracking: {:?}", board.candidates);
                             // println!("candidates_copy before backtracking: {:?}", candidates_copy);
                             board.candidates = candidates_copy.clone();  // Revert the board
@@ -495,15 +501,9 @@ impl Solver for CSPSolver {
                         println!("CSPSOLVER: Assigning {} to {} succeeded", digit, cell);
                         // digit is good, go one layer deeper.
                         counter += 1;
-                        // println!("Counter: {}", counter);
+                        println!("Counter: {}", counter);
                     }
                 }
-                // println!("Digitstack: {:?}", digitstack);
-                // println!("Cell: {}", cell);
-                // if digitstack.len() != 0 {
-                //     println!("Popping!");
-                //     self.queue.pop();
-                // }
                 if board.candidates[cell].len() == 1 {
                     self.queue.remove(index);
                     if index != 0 {
@@ -623,8 +623,8 @@ impl Solver for RuleBasedSolver {
     
         // If board is not solved, apply brute force solver
         else {
-            let mut brute_force_solver = BruteForceSolver;
-            return brute_force_solver.solve(board);
+            let mut csp_solver = CSPSolver::new();
+            return csp_solver.solve(board);
         }
     }
 
