@@ -154,13 +154,13 @@ impl Sudoku {
         Ok(grid)
     }
 
-    // Initialize candidates for each cell, given the current board
+
     fn initialize_candidates(&mut self) {
         // First, initialize candidates for each cell as if they were all empty
         for cell in &self.cells {
             self.candidates.insert(cell.clone(), (1..=9).collect());
         }
-
+    
         // Then, go through the board and for each cell that has a value,
         // remove this value from the candidates of all its peers
         for row in 0..9 {
@@ -168,11 +168,19 @@ impl Sudoku {
                 let cell = utils::coords_to_cell(row, col);
                 let digit = self.board[row][col];
                 if digit != 0 {
-                    self.assign(&cell, digit as usize);
+                    let digit = digit as usize;
+                    self.candidates.get_mut(&cell).unwrap().clear();
+                    self.candidates.get_mut(&cell).unwrap().insert(digit);
+                    for peer in &self.peers[&cell] {
+                        self.candidates.get_mut(peer).unwrap().remove(&digit);
+                    }
                 }
             }
         }
     }
+    
+    
+    
 
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
         // println!("Assigning {} to {}", digit, cell);
@@ -191,64 +199,38 @@ impl Sudoku {
     }
 
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
-        // println!("Eliminating {} from {}", digit, cell);
-        // println!("Candidates for {} are {:?}", cell, self.candidates[cell]);
         let mut tasks = vec![(cell.to_string(), digit)];
-        let mut processed = HashSet::new();  // This set will track which tasks have been processed
+        let mut processed = HashSet::new();
     
         while let Some(task) = tasks.pop() {
-            let (cell, digit) = task.clone();
-            // If the task has been processed before, skip it
-            if processed.contains(&task) {
+            if !processed.insert(task.clone()) {
                 continue;
             }
-            // Otherwise, add it to the processed set
-            processed.insert(task);
-
-            // If the digit is not a candidate, we do nothing and continue with the next task
-            if !self.candidates[&cell].contains(&digit) {
+            
+            let (ref cell, digit) = task;
+            if !self.candidates[cell].contains(&digit) {
                 continue;
             }
-            // If the digit has more than one candidate, we remove it from the candidates of the cell
-            if self.candidates[&cell].len() > 1 {
-                self.candidates.get_mut(&cell).unwrap().remove(&digit);
-                // println!("Eliminated {} from {}", digit, cell);
-                // println!("Candidates for {} are now {:?}", cell, self.candidates[&cell]);
-                // println!("Candidates of board are now {:?}", self.candidates);
-                // println!("Peers of cell are {:?}", self.peers[&cell]);
-            }
-            // If the cell has no remaining candidates, we return false to signal a contradiction
-            if self.candidates[&cell].is_empty() {
-                println!("Contradiction: {} has no candidates left", cell);
+            
+            if self.candidates[cell].len() > 1 {
+                self.candidates.get_mut(cell).unwrap().remove(&digit);
+            } else if self.candidates[cell].is_empty() {
                 return false;
-            }
-            // If the cell has one remaining candidate, we need to eliminate this digit from all peers
-            else if self.candidates[&cell].len() == 1 {
-                let d2 = *self.candidates[&cell].iter().next().unwrap();
-    
-                // Get a copy of peers before we start mutating `self`
-                let peers = self.peers[&cell].clone();
-    
-                // Instead of recursively calling eliminate, add the peers to the task list
-                for s2 in peers.iter() {
+            } else if self.candidates[cell].len() == 1 {
+                let d2 = *self.candidates[cell].iter().next().unwrap();
+                let peers = &self.peers[cell];
+                for s2 in peers {
                     tasks.push((s2.clone(), d2));
                 }
             }
-    
-            // Ensure that for every unit of the cell, the digit has at least one place it can be
-            let units = vec![self.row_peers[&cell].clone(), self.col_peers[&cell].clone(), self.box_peers[&cell].clone()];
-            for unit in units.iter() {
-                let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).cloned().collect();
-                // If not, we return false to signal a contradiction
+            
+            let units = vec![self.row_peers[cell].clone(), self.col_peers[cell].clone(), self.box_peers[cell].clone()];
+            for unit in &units {
+                let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).collect();
                 if d_places.is_empty() {
-                    println!("Contradiction: {:?} has no place for {}", unit, digit);
                     return false;
-                } 
-                // If there is only one such place, we assign the digit there
-                else if d_places.len() == 1 {
-                    // println!("Only one place for {} in {:?}: {}", digit, unit, d_places[0]);
+                } else if d_places.len() == 1 {
                     if !self.assign(&d_places[0], digit) {
-                        // println!("Assigning {} to {} resulted in a contradiction", digit, d_places[0]);
                         return false;
                     }
                 }
@@ -256,6 +238,7 @@ impl Sudoku {
         }
         true
     }
+    
 
     // Check if a given number is valid in a given cell
     // Check directly on the board. If the cell is 0, check if the number is valid
@@ -411,45 +394,98 @@ pub struct BruteForceSolver;
 
 impl Solver for BruteForceSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
-        let mut empty_cells = vec![];
+        let mut min_candidates = 10;
+        let mut cell_to_fill = None;
+    
         for row in 0..9 {
             for col in 0..9 {
                 if board.board[row][col] == 0 {
-                    empty_cells.push((row, col));
+                    let candidates = &board.candidates[&utils::coords_to_cell(row, col)];
+                    let num_candidates = candidates.len();
+                    if num_candidates < min_candidates {
+                        min_candidates = num_candidates;
+                        cell_to_fill = Some((row, col));
+                    }
                 }
             }
         }
-
-        println!("Empty cells: {:?}", empty_cells);
-        board.candidates_to_string();
-
-        // let cell_id = utils::coords_to_cell(row, col);
-        // if !board.candidates.contains_key(&cell_id) {
-        //     println!("No candidates for cell with ID: {}", cell_id);
-        // }
-        empty_cells.sort_by_key(|&(row, col)| board.candidates[&utils::coords_to_cell(row, col)].len());
     
-        if empty_cells.is_empty() {
-            println!("Brute force solved!");
-            return true; // All cells filled, solution found
-        }
-    
-        let (row, col) = empty_cells[0];
-        let cell = utils::coords_to_cell(row, col);
-        let candidates = board.candidates[&cell].clone(); // Clone the candidates for the first empty cell
-    
-        for &num in candidates.iter() {
-            if board.is_valid(row, col, num) {
-                board.board[row][col] = num as u8;
-                if self.solve(board) {
-                    return true;
+        match cell_to_fill {
+            None => {
+                // No empty cells left, solution found
+                return true;
+            },
+            Some((row, col)) => {
+                let cell = utils::coords_to_cell(row, col);
+                let candidates = board.candidates[&cell].clone(); // Clone the candidates for the first empty cell
+            
+                for &num in candidates.iter() {
+                    println!("Trying {} in {}", num, cell);
+                    if board.is_valid(row, col, num) {
+                        board.board[row][col] = num as u8;
+                        if self.solve(board) {
+                            println!("Brute force solver finished.");
+                            return true;
+                        }
+                        board.board[row][col] = 0; // Undo the assignment
+                    }
                 }
-                board.board[row][col] = 0; // Undo the assignment
             }
         }
     
         false // No solution found
     }
+    
+
+
+
+
+
+
+
+
+
+
+
+
+        // let mut empty_cells = vec![];
+        // for row in 0..9 {
+        //     for col in 0..9 {
+        //         if board.board[row][col] == 0 {
+        //             empty_cells.push((row, col));
+        //         }
+        //     }
+        // }
+    
+        // empty_cells.sort_by_key(|&(row, col)| board.candidates[&utils::coords_to_cell(row, col)].len());
+    
+        // let mut stack = vec![];
+        // stack.push((0, board.clone())); // Use a stack to keep track of the current position and board state
+    
+        // while let Some((index, current_board)) = stack.pop() {
+        //     if index == empty_cells.len() {
+        //         *board = current_board; // If all empty cells are filled, update the original board and return true
+        //         return true;
+        //     }
+    
+        //     let (row, col) = empty_cells[index];
+        //     let cell = utils::coords_to_cell(row, col);
+        //     let candidates = current_board.candidates[&cell].clone(); // Clone the candidates for the current empty cell
+    
+        //     for &num in candidates.iter() {
+        //         if current_board.is_valid(row, col, num) {
+        //             let mut new_board = current_board.clone(); // Clone the current board to create a new board state
+        //             new_board.board[row][col] = num as u8;
+        //             stack.push((index + 1, new_board)); // Push the next position and new board state onto the stack
+        //         }
+        //     }
+        // }
+    
+        // false // If the stack is empty, there's no solution
+    // }
+    
+    
+    
     
 
 
@@ -612,11 +648,7 @@ impl Solver for RuleBasedSolver {
 
         // Loop through rules
         loop {
-            let boardcopy: HashMap<String, HashSet<usize>> = board
-                .candidates
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect();  // Make a copy of the board
+            let boardcopy = self.cells_with_candidates.clone();
             
             let mut changes_made = false;
 
@@ -636,12 +668,9 @@ impl Solver for RuleBasedSolver {
             if !changes_made {
                 break;
             }
-            // if self.solved(board) {
-            //     break;
-            // }
 
             // if boardcopy is the same as the board then no changes were made and we can break
-            if boardcopy == board.candidates {
+            if boardcopy == self.cells_with_candidates {
                 break;
             }
         }
@@ -674,7 +703,6 @@ impl Solver for RuleBasedSolver {
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
         board.initialize_candidates();
         board.candidates_to_string();
-        // faggot
     }
 
     fn is_correct(&self, board: &mut Sudoku) -> bool {
@@ -1129,6 +1157,7 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
 
 pub struct StochasticSolver {
     temperature: f64,
+    temperature_start: f64,
     cooling_factor: f64,
     units: Vec<Vec<String>>,
     counter: usize,
@@ -1199,6 +1228,7 @@ impl Solver for StochasticSolver {
             self.cool_down();
         }
         println!("Stochastic solver finished.");
+        self.temperature = self.temperature_start;
         score == -243
     }
 
@@ -1226,6 +1256,7 @@ impl StochasticSolver {
 
         StochasticSolver { 
             temperature, 
+            temperature_start: temperature,
             cooling_factor,
             units,
             counter
