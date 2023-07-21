@@ -6,7 +6,6 @@ use crate::utils;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use prettytable::{Table, Row, Cell};
-use prettytable::format;
 
 
 // use std::collections::LinkedList;
@@ -426,12 +425,6 @@ impl Sudoku {
         // Print the table to stdout
         table.printstd();
     }
-    
-    
-    
-    
-    
-
 }
 
 pub trait Solver {
@@ -472,20 +465,6 @@ impl Solver for BruteForceSolver {
             Some((row, col)) => {
                 let cell = utils::coords_to_cell(row, col);
                 let candidates = board.candidates[&cell].clone(); // Clone the candidates for the first empty cell
-            
-                // for &num in candidates.iter() {
-                //     board.print_board();
-                //     println!("Trying to fill {} with {}", cell, num);
-                //     if board.is_valid(row, col, num) {
-                //         println!("Valid");
-                //         board.board[row][col] = num as u8;
-                //         if self.solve(board) {
-                //             println!("Brute force solver finished.");
-                //             return true;
-                //         }
-                //         board.board[row][col] = 0; // Undo the assignment
-                //     }
-                // }
 
                 for &num in candidates.iter() {
                     board.print_board();
@@ -528,14 +507,14 @@ impl BruteForceSolver {
 
 // Constraint programming with forward propagation and backtracking.
 
-pub struct CSPSolver {
+pub struct DeepDFSSolver {
     queue: Vec<String>
 }
 
-impl CSPSolver {
+impl DeepDFSSolver {
     // Constructor for CSPSolver
     pub fn new() -> Self {
-        CSPSolver {
+        DeepDFSSolver {
             queue: Vec::new()
         }
     }
@@ -552,7 +531,7 @@ impl CSPSolver {
 }
 
 
-impl Solver for CSPSolver {
+impl Solver for DeepDFSSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
             
         let mut depth = 1;
@@ -611,12 +590,12 @@ impl Solver for CSPSolver {
             board.print_candidates();
         }
         // solved
-        println!("CSPsolver finished.");
+        println!("DeepDFSsolver finished.");
         return true;
     }
 
     fn name(&self) -> String {
-        "Constraint Programming Solver".to_string()
+        "Iterative Deepening DFS Solver".to_string()
     }
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
@@ -700,16 +679,16 @@ impl Solver for RuleBasedSolver {
     
         // If board is not solved, apply brute force solver
         else {
-            let mut csp_solver = CSPSolver::new();
+            let mut dfs_solver = DeepDFSSolver::new();
 
             // Priority queue for candidates
-            csp_solver.queue = board.cells.iter()
+            dfs_solver.queue = board.cells.iter()
                 .filter(|cell| board.candidates[*cell].len() > 1)
                 .cloned()
                 .collect();
-            csp_solver.queue.sort_by_key(|cell| board.candidates[cell].len());
+            dfs_solver.queue.sort_by_key(|cell| board.candidates[cell].len());
 
-            return csp_solver.solve(board);
+            return dfs_solver.solve(board);
         }
     }
 

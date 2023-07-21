@@ -4,16 +4,11 @@ use std::time::Instant;
 use csv::Writer;
 mod sudoku;
 mod utils;
-use std::collections::VecDeque;
 #[macro_use] extern crate prettytable;
 use prettytable::{Table, Row, Cell};
 
 
-
-
-use crate::sudoku::{Sudoku, BruteForceSolver,
-    // CSPSolver,
-    RuleBasedSolver, StochasticSolver, CSPSolver, Solver};
+use crate::sudoku::{Sudoku, BruteForceSolver, RuleBasedSolver, StochasticSolver, DeepDFSSolver, Solver};
 
 fn main() {
     let mut writer = Writer::from_path("./data/output.csv").unwrap();
@@ -32,7 +27,7 @@ fn main() {
     let mut solvers: Vec<Box<dyn Solver>> = vec![
         Box::new(BruteForceSolver::new()),
         Box::new(RuleBasedSolver::new()),
-        Box::new(CSPSolver::new()),
+        Box::new(DeepDFSSolver::new()),
         Box::new(StochasticSolver::new(10000.0, 0.999, first_sudoku.clone())),
     ];
 

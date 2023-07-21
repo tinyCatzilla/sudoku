@@ -11,3 +11,17 @@ num = "0.4.1"
 rand = "0.8.5"
 itertools = "0.10.1"
 prettytable-rs = "^0.10"
+gnuplot = "0.0.39"
+color-eyre = "0.6.2"
+
+
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+
+[profile.release]
+debug = true
+
+[[bench]]
+name = "my_benchmark"
+harness = false
+
