@@ -155,7 +155,7 @@ impl Sudoku {
     }
 
 
-    fn initialize_candidates(&mut self) {
+    fn initialize_candidates_lw(&mut self) {
         // First, initialize candidates for each cell as if they were all empty
         for cell in &self.cells {
             self.candidates.insert(cell.clone(), (1..=9).collect());
@@ -178,8 +178,21 @@ impl Sudoku {
             }
         }
     }
-    
-    
+
+    fn initialize_candidates_heavy(&mut self) {
+        for cell in &self.cells {
+            self.candidates.insert(cell.clone(), (1..=9).collect());
+        }
+        for row in 0..9 {
+            for col in 0..9 {
+                let cell = utils::coords_to_cell(row, col);
+                let digit = self.board[row][col];
+                if digit != 0 {
+                    self.assign(&cell, digit as usize);
+                }
+            }
+        }
+    }
     
 
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
@@ -200,36 +213,38 @@ impl Sudoku {
 
     fn eliminate(&mut self, cell: &str, digit: usize) -> bool {
         let mut tasks = vec![(cell.to_string(), digit)];
-        let mut processed = HashSet::new();
-    
+        let mut processed = HashSet::new(); 
         while let Some(task) = tasks.pop() {
-            if !processed.insert(task.clone()) {
+            let (cell, digit) = task.clone();
+            if processed.contains(&task) {
                 continue;
             }
-            
-            let (ref cell, digit) = task;
-            if !self.candidates[cell].contains(&digit) {
+            processed.insert(task);
+            if !self.candidates[&cell].contains(&digit) {
                 continue;
             }
-            
-            if self.candidates[cell].len() > 1 {
-                self.candidates.get_mut(cell).unwrap().remove(&digit);
-            } else if self.candidates[cell].is_empty() {
+            if self.candidates[&cell].len() > 1 {
+                self.candidates.get_mut(&cell).unwrap().remove(&digit);
+            }
+            if self.candidates[&cell].is_empty() {
+                println!("Contradiction: {} has no candidates left", cell);
                 return false;
-            } else if self.candidates[cell].len() == 1 {
-                let d2 = *self.candidates[cell].iter().next().unwrap();
-                let peers = &self.peers[cell];
-                for s2 in peers {
+            }
+            else if self.candidates[&cell].len() == 1 {
+                let d2 = *self.candidates[&cell].iter().next().unwrap();
+                let peers = self.peers[&cell].clone();
+                for s2 in peers.iter() {
                     tasks.push((s2.clone(), d2));
                 }
             }
-            
-            let units = vec![self.row_peers[cell].clone(), self.col_peers[cell].clone(), self.box_peers[cell].clone()];
-            for unit in &units {
-                let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).collect();
+            let units = vec![self.row_peers[&cell].clone(), self.col_peers[&cell].clone(), self.box_peers[&cell].clone()];
+            for unit in units.iter() {
+                let d_places: Vec<_> = unit.iter().filter(|&s| self.candidates[s].contains(&digit)).cloned().collect();
                 if d_places.is_empty() {
+                    println!("Contradiction: {:?} has no place for {}", unit, digit);
                     return false;
-                } else if d_places.len() == 1 {
+                } 
+                else if d_places.len() == 1 {
                     if !self.assign(&d_places[0], digit) {
                         return false;
                     }
@@ -330,7 +345,7 @@ impl Sudoku {
         return self.board_correct();
     }
 
-    fn candidates_to_string(&self) {
+    fn print_candidates(&self) {
         let mut table = Table::new();
     
         // Print row index
@@ -368,7 +383,46 @@ impl Sudoku {
                 table.add_row(Row::new(separator_row));
             }
         }
-    
+        // Print the table to stdout
+        table.printstd();
+    }
+
+    fn print_board(&self){
+        // print self.board with the same format as print_candidates
+        let mut table = Table::new();
+        // Print row index
+        table.add_row(row![c -> " ", c -> "1", c -> "2", c -> "3", c -> " ", c -> "4", c -> "5", c -> "6", c -> " ",c -> "7", c -> "8", c -> "9"]);
+
+        for row in 0..9{
+            let mut row_vec = Vec::new();
+            // Print column index
+            row_vec.push(Cell::new(&(char::from_u32('A' as u32 + row as u32).unwrap().to_string())).style_spec("c"));
+            
+            for col in 0..9 {
+                let digit = self.board[row][col];
+                let mut digit_string = String::new();
+                if digit != 0 {
+                    digit_string.push_str(&digit.to_string());
+                }
+                else{
+                    digit_string.push_str(" ");
+                }
+                let color_spec = if digit != 0 { "cFG" } else { "cFR" };
+                row_vec.push(Cell::new(&digit_string).style_spec(color_spec));
+
+                // Add vertical separator every 3 columns
+                if (col + 1) % 3 == 0 && col != 8 {
+                    row_vec.push(Cell::new(" "));
+                }
+            }
+            table.add_row(Row::new(row_vec));
+
+            // Add horizontal separator every 3 rows
+            if (row + 1) % 3 == 0 && row != 8 {
+                let separator_row: Vec<Cell> = vec![Cell::new(" "); 12];
+                table.add_row(Row::new(separator_row));
+            }
+        }
         // Print the table to stdout
         table.printstd();
     }
@@ -419,83 +473,46 @@ impl Solver for BruteForceSolver {
                 let cell = utils::coords_to_cell(row, col);
                 let candidates = board.candidates[&cell].clone(); // Clone the candidates for the first empty cell
             
+                // for &num in candidates.iter() {
+                //     board.print_board();
+                //     println!("Trying to fill {} with {}", cell, num);
+                //     if board.is_valid(row, col, num) {
+                //         println!("Valid");
+                //         board.board[row][col] = num as u8;
+                //         if self.solve(board) {
+                //             println!("Brute force solver finished.");
+                //             return true;
+                //         }
+                //         board.board[row][col] = 0; // Undo the assignment
+                //     }
+                // }
+
                 for &num in candidates.iter() {
-                    println!("Trying {} in {}", num, cell);
+                    board.print_board();
+                    println!("Trying to fill {} with {}", cell, num);
                     if board.is_valid(row, col, num) {
-                        board.board[row][col] = num as u8;
+                        println!("Valid");
+                        board.board[row][col] = num as u8; // Now it's only placed on the board after it's been verified to be valid
                         if self.solve(board) {
                             println!("Brute force solver finished.");
                             return true;
+                        } else {
+                            board.board[row][col] = 0; // Undo the assignment only if the recursive call to solve failed
                         }
-                        board.board[row][col] = 0; // Undo the assignment
                     }
-                }
+                }                
             }
         }
-    
         false // No solution found
     }
-    
-
-
-
-
-
-
-
-
-
-
-
-
-        // let mut empty_cells = vec![];
-        // for row in 0..9 {
-        //     for col in 0..9 {
-        //         if board.board[row][col] == 0 {
-        //             empty_cells.push((row, col));
-        //         }
-        //     }
-        // }
-    
-        // empty_cells.sort_by_key(|&(row, col)| board.candidates[&utils::coords_to_cell(row, col)].len());
-    
-        // let mut stack = vec![];
-        // stack.push((0, board.clone())); // Use a stack to keep track of the current position and board state
-    
-        // while let Some((index, current_board)) = stack.pop() {
-        //     if index == empty_cells.len() {
-        //         *board = current_board; // If all empty cells are filled, update the original board and return true
-        //         return true;
-        //     }
-    
-        //     let (row, col) = empty_cells[index];
-        //     let cell = utils::coords_to_cell(row, col);
-        //     let candidates = current_board.candidates[&cell].clone(); // Clone the candidates for the current empty cell
-    
-        //     for &num in candidates.iter() {
-        //         if current_board.is_valid(row, col, num) {
-        //             let mut new_board = current_board.clone(); // Clone the current board to create a new board state
-        //             new_board.board[row][col] = num as u8;
-        //             stack.push((index + 1, new_board)); // Push the next position and new board state onto the stack
-        //         }
-        //     }
-        // }
-    
-        // false // If the stack is empty, there's no solution
-    // }
-    
-    
-    
-    
-
 
     fn name(&self) -> String {
         "Brute Force Solver".to_string()
     }
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
-        board.initialize_candidates();
-        board.candidates_to_string();
+        board.initialize_candidates_heavy();
+        board.print_candidates();
     }
 
     fn is_correct(&self, board: &mut Sudoku) -> bool {
@@ -591,7 +608,7 @@ impl Solver for CSPSolver {
             depth += 1;
             println!("Depth: {}", depth);
             println!("Queue: {:?}", self.queue);
-            board.candidates_to_string();
+            board.print_candidates();
         }
         // solved
         println!("CSPsolver finished.");
@@ -603,7 +620,7 @@ impl Solver for CSPSolver {
     }
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
-        board.initialize_candidates();
+        board.initialize_candidates_heavy();
 
         // Priority queue for candidates
         // cells must have more than 1 candidate
@@ -616,7 +633,7 @@ impl Solver for CSPSolver {
         // sort by number of candidates (value, ascending)
         self.queue.sort_by_key(|cell| board.candidates[cell].len());
 
-        board.candidates_to_string();
+        board.print_candidates();
     }
 
     fn is_correct(&self, board: &mut Sudoku) -> bool {
@@ -663,7 +680,7 @@ impl Solver for RuleBasedSolver {
             //     changes_made = true;  
             // }
 
-            board.candidates_to_string();
+            board.print_candidates();
 
             if !changes_made {
                 break;
@@ -701,8 +718,8 @@ impl Solver for RuleBasedSolver {
     }
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
-        board.initialize_candidates();
-        board.candidates_to_string();
+        board.initialize_candidates_lw();
+        board.print_candidates();
     }
 
     fn is_correct(&self, board: &mut Sudoku) -> bool {
