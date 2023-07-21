@@ -296,7 +296,7 @@ impl Sudoku {
     }
 
     // Check if the board is solved
-    pub fn is_solved(&self) -> bool {
+    pub fn board_correct(&self) -> bool {
         for i in 0..9 {
             let mut row = [false; 9];
             let mut col = [false; 9];
@@ -331,6 +331,20 @@ impl Sudoku {
             }
         }
         true
+    }
+
+    pub fn candidates_correct(&mut self) -> bool{
+        // Update self.board to be equivalent to the candidate board
+        for row in 0..9 {
+            for col in 0..9 {
+                let cell = utils::coords_to_cell(row, col);
+                let candidates = self.candidates.get(&cell).unwrap().clone();
+                if candidates.len() == 1 {
+                    self.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
+                }
+            }
+        }
+        return self.board_correct();
     }
 
     fn candidates_to_string(&self) {
@@ -387,6 +401,7 @@ pub trait Solver {
     fn solve(&mut self, board: &mut Sudoku) -> bool;
     fn name(&self) -> String;
     fn initialize_candidates(&mut self, sudoku: &mut Sudoku);
+    fn is_correct(&self, board: &mut Sudoku) -> bool;
 }
 
 pub struct BruteForceSolver;
@@ -445,6 +460,10 @@ impl Solver for BruteForceSolver {
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
         board.initialize_candidates();
         board.candidates_to_string();
+    }
+
+    fn is_correct(&self, board: &mut Sudoku) -> bool {
+        board.board_correct()
     }
 }
 
@@ -539,17 +558,6 @@ impl Solver for CSPSolver {
             board.candidates_to_string();
         }
         // solved
-
-        // Update self.board to be equivalent to the candidate board
-        for row in 0..9 {
-            for col in 0..9 {
-                let cell = utils::coords_to_cell(row, col);
-                let candidates = board.candidates.get(&cell).unwrap().clone();
-                if candidates.len() == 1 {
-                    board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
-                }
-            }
-        }
         println!("CSPsolver finished.");
         return true;
     }
@@ -574,6 +582,10 @@ impl Solver for CSPSolver {
 
         board.candidates_to_string();
     }
+
+    fn is_correct(&self, board: &mut Sudoku) -> bool {
+        board.candidates_correct()
+    }
 }
 
 
@@ -585,6 +597,14 @@ pub struct RuleBasedSolver{
 
 impl Solver for RuleBasedSolver {
     fn solve(&mut self, board: &mut Sudoku) -> bool {
+
+        // If board is solved, update it
+        if self.solved(board) {           
+            println!("Rule-based solver finished.");
+            return true;
+        }
+
+
         self.cells_with_candidates = board.cells.iter()
             .filter(|cell| board.candidates[*cell].len() > 1)
             .cloned()
@@ -597,7 +617,7 @@ impl Solver for RuleBasedSolver {
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();  // Make a copy of the board
-            board.candidates_to_string();
+            
             let mut changes_made = false;
 
             // Try to apply each rule in turn.
@@ -610,6 +630,9 @@ impl Solver for RuleBasedSolver {
             // if self.apply_complex_rules(board) {
             //     changes_made = true;  
             // }
+
+            board.candidates_to_string();
+
             if !changes_made {
                 break;
             }
@@ -625,16 +648,6 @@ impl Solver for RuleBasedSolver {
     
         // If board is solved, update it
         if self.solved(board) {           
-            // Update self.board to be equivalent to the candidate board
-            for row in 0..9 {
-                for col in 0..9 {
-                    let cell = utils::coords_to_cell(row, col);
-                    let candidates = board.candidates.get(&cell).unwrap().clone();
-                    if candidates.len() == 1 {
-                        board.board[row][col] = candidates.iter().next().unwrap().clone() as u8;
-                    }
-                }
-            }
             println!("Rule-based solver finished.");
             return true;
         }
@@ -660,7 +673,12 @@ impl Solver for RuleBasedSolver {
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
         board.initialize_candidates();
-        // println!("Candidates: {:?}", board.candidates);
+        board.candidates_to_string();
+        // faggot
+    }
+
+    fn is_correct(&self, board: &mut Sudoku) -> bool {
+        board.candidates_correct()
     }
 }
 
@@ -704,11 +722,11 @@ impl RuleBasedSolver {
         let mut applied = false;
 
         if self.locked_candidates_type_1(board) {
-            println!("Locked candidates type 1 applied");
+            // println!("Locked candidates type 1 applied");
             applied = true;
         }
         if self.locked_candidates_type_2(board) {
-            println!("Locked candidates type 2 applied");
+            // println!("Locked candidates type 2 applied");
             applied = true;
         }
         applied
@@ -729,11 +747,13 @@ impl RuleBasedSolver {
     //     applied
     // }
 
-    fn solved(&self, board: &Sudoku) -> bool {
-        // Check if the board is solved by verifying that every cell has exactly one candidate
-        for cell in board.candidates.keys() {
-            if board.candidates.get(cell).unwrap().len() != 1 {
-                return false;
+    fn solved(&mut self, board: &Sudoku) -> bool {
+        for cell in self.cells_with_candidates.clone() {
+            if board.candidates[&cell].len() == 1 {
+                self.cells_with_candidates.pop();
+            }
+            else {
+                return false
             }
         }
         true
@@ -837,24 +857,32 @@ impl RuleBasedSolver {
     fn hidden_pair(&self, board: &mut Sudoku) -> bool {
         let mut found = false;
         for cell in &self.cells_with_candidates {
-            for unit in vec![board.row_peers[cell].clone(), board.col_peers[cell].clone(), board.box_peers[cell].clone()] {
-                for digit1 in 1..9 {
-                    for digit2 in (digit1 + 1)..10 {
-                        let cells_with_digits: Vec<_> = unit.iter()
+            let candidates = &board.candidates[cell].clone();
+            for &digit1 in candidates {
+                for &digit2 in candidates {
+                    if digit1 >= digit2 {
+                        continue;
+                    }
+                    for unit in vec![&board.row_peers[cell].clone(), &board.col_peers[cell].clone(), &board.box_peers[cell].clone()] {
+                        // Find other cells in the unit that contain either digit1 or digit2
+                        let other_cells: Vec<_> = unit.iter()
                             .filter(|&cell2| board.candidates[cell2].contains(&digit1) || board.candidates[cell2].contains(&digit2))
-                            .cloned()
                             .collect();
-                        if cells_with_digits.len() == 2 && cells_with_digits.contains(&cell) {
-                            let other_cell = cells_with_digits.iter().find(|&cell2| cell2 != cell).unwrap();
-                            if board.candidates[other_cell].contains(&digit1) && board.candidates[other_cell].contains(&digit2) {
-                                for digit in board.candidates[cell].clone() {
-                                    if digit != digit1 && digit != digit2 {
-                                        if !board.eliminate(&cell, digit) {
-                                            panic!("Contradiction encountered during hidden pair");
-                                        }
+                        // If there's exactly one other cell with either of the two digits, we have a hidden pair
+                        if other_cells.len() != 1 {
+                            continue;
+                        }
+                        let other_cell = &other_cells[0];
+                        // If the other cell contains both digits, eliminate all other digits from both cells
+                        if board.candidates[*other_cell].contains(&digit1) && board.candidates[*other_cell].contains(&digit2) {
+                            for digit in candidates.union(&board.candidates[*other_cell]).cloned().collect::<HashSet<_>>() {
+                                if digit != digit1 && digit != digit2 {
+                                    if !board.eliminate(cell, digit) || !board.eliminate(other_cell, digit) {
+                                        panic!("Contradiction encountered during hidden pair");
+                                    } else {
+                                        found = true;
                                     }
                                 }
-                                found = true;
                             }
                         }
                     }
@@ -862,7 +890,13 @@ impl RuleBasedSolver {
             }
         }
         found
-    }    
+    }
+    
+    
+    
+    
+    
+    
     
 // Locked Candidates Type 1:
 fn locked_candidates_type_1(&self, board: &mut Sudoku) -> bool {
@@ -968,7 +1002,6 @@ fn locked_candidates_type_2(&self, board: &mut Sudoku) -> bool {
                             panic!("Contradiction encountered during locked candidates type 2");
                         }
                         else {
-                            println!("STOP");
                             found = true;
                         }
                     }
@@ -1175,6 +1208,10 @@ impl Solver for StochasticSolver {
 
     fn initialize_candidates(&mut self, _board: &mut Sudoku) {
         // unneeded
+    }
+
+    fn is_correct(&self, board: &mut Sudoku) -> bool {
+        board.board_correct()
     }
 } 
 

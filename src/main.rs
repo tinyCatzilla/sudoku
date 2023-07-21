@@ -52,7 +52,7 @@ fn main() {
             let result = solver.solve(&mut sudoku_clone);
             let duration = start.elapsed();
 
-            let is_correct = sudoku_clone.is_solved(); // assuming is_solved method exists
+            let is_correct = solver.is_correct(&mut sudoku_clone);
 
             writer.write_record(&[
                 &line, 
