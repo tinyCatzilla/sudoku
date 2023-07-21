@@ -4,6 +4,9 @@ use std::time::Instant;
 use csv::Writer;
 mod sudoku;
 mod utils;
+#[macro_use] extern crate prettytable;
+use prettytable::{Table, Row, Cell};
+
 
 
 

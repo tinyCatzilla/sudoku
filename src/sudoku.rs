@@ -5,6 +5,9 @@ use rand::Rng;
 use crate::utils;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
+use prettytable::{Table, Row, Cell};
+use prettytable::format;
+
 
 // use std::collections::LinkedList;
 // use std::rc::Rc;
@@ -171,38 +174,6 @@ impl Sudoku {
         }
     }
 
-            // // If the digit is not a candidate, we do nothing and return true
-        // if !self.candidates[cell].contains(&digit) {
-        //     return true;
-        // }
-        // // If the digit has more than one candidate, we remove it from the candidates of the cell
-        // if self.candidates[cell].len() > 1 {
-        //     self.candidates.get_mut(cell).unwrap().remove(&digit);
-        //     println!("Eliminated {} from {}", digit, cell);
-        //     println!("Candidates for {} are now {:?}", cell, self.candidates[cell]);
-        // }
-        
-        // // If the cell has no remaining candidates, we return false to signal a contradiction
-        // if self.candidates[cell].is_empty() {
-        //     println!("Contradiction: {} has no candidates left", cell);
-        //     return false;
-        // } 
-        // // If the cell has one remaining candidate, we need to eliminate this digit from all peers
-        // else if self.candidates[cell].len() == 1 {
-        //     let d2 = *self.candidates[cell].iter().next().unwrap();
-        
-        //     // Get a copy of peers before we start mutating `self`
-        //     let peers = self.peers[cell].clone();
-        
-        //     // If elimination from any peer results in a contradiction, we return false
-        //     for s2 in peers.iter() {
-        //         if !self.eliminate(s2, d2) {
-        //             println!("Elimination of {} from {} resulted in a contradiction", d2, s2);
-        //             return false;
-        //         }
-        //     }
-        // }
-
     fn assign(&mut self, cell: &str, digit: usize) -> bool {
         // println!("Assigning {} to {}", digit, cell);
         // other_values is a set of digits that are not equal to the assigned digit
@@ -285,7 +256,6 @@ impl Sudoku {
         }
         true
     }
-        
 
     // Check if a given number is valid in a given cell
     // Check directly on the board. If the cell is 0, check if the number is valid
@@ -363,6 +333,54 @@ impl Sudoku {
         true
     }
 
+    fn candidates_to_string(&self) {
+        let mut table = Table::new();
+    
+        // Print row index
+        table.add_row(row![c -> " ", c -> "1", c -> "2", c -> "3", c -> " ", c -> "4", c -> "5", c -> "6", c -> " ",c -> "7", c -> "8", c -> "9"]);
+    
+        for row in 0..9 {
+            let mut row_vec = Vec::new();
+            // Print column index
+            row_vec.push(Cell::new(&(char::from_u32('A' as u32 + row as u32).unwrap().to_string())).style_spec("c"));
+            
+            for col in 0..9 {
+                let cell = utils::coords_to_cell(row, col);
+                let mut candidates = self.candidates.get(&cell).unwrap().clone().into_iter().collect::<Vec<_>>();
+                candidates.sort();
+    
+                let mut candidates_string = String::new();
+                for candidate in candidates.iter() {
+                    candidates_string.push_str(&candidate.to_string());
+                }
+                
+                let color_spec = if candidates.len() == 1 { "cFG" } else { "cFR" };
+                row_vec.push(Cell::new(&candidates_string).style_spec(color_spec));
+    
+                // Add vertical separator every 3 columns
+                if (col + 1) % 3 == 0 && col != 8 {
+                    row_vec.push(Cell::new(" "));
+                }
+            }
+    
+            table.add_row(Row::new(row_vec));
+    
+            // Add horizontal separator every 3 rows
+            if (row + 1) % 3 == 0 && row != 8 {
+                let separator_row: Vec<Cell> = vec![Cell::new(" "); 12];
+                table.add_row(Row::new(separator_row));
+            }
+        }
+    
+        // Print the table to stdout
+        table.printstd();
+    }
+    
+    
+    
+    
+    
+
 }
 
 pub trait Solver {
@@ -388,7 +406,7 @@ impl Solver for BruteForceSolver {
         }
 
         println!("Empty cells: {:?}", empty_cells);
-        println!("Candidates: {:?}", board.candidates);
+        board.candidates_to_string();
 
         // let cell_id = utils::coords_to_cell(row, col);
         // if !board.candidates.contains_key(&cell_id) {
@@ -426,7 +444,7 @@ impl Solver for BruteForceSolver {
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
         board.initialize_candidates();
-        println!("Candidates: {:?}", board.candidates);
+        board.candidates_to_string();
     }
 }
 
@@ -518,7 +536,7 @@ impl Solver for CSPSolver {
             depth += 1;
             println!("Depth: {}", depth);
             println!("Queue: {:?}", self.queue);
-            println!("Candidates: {:?}", board.candidates);
+            board.candidates_to_string();
         }
         // solved
 
@@ -554,7 +572,7 @@ impl Solver for CSPSolver {
         // sort by number of candidates (value, ascending)
         self.queue.sort_by_key(|cell| board.candidates[cell].len());
 
-        println!("Candidates: {:?}", board.candidates);
+        board.candidates_to_string();
     }
 }
 
@@ -579,7 +597,7 @@ impl Solver for RuleBasedSolver {
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();  // Make a copy of the board
-            println!("Candidates: {:?}", board.candidates);
+            board.candidates_to_string();
             let mut changes_made = false;
 
             // Try to apply each rule in turn.
@@ -642,7 +660,7 @@ impl Solver for RuleBasedSolver {
 
     fn initialize_candidates(&mut self, board: &mut Sudoku) {
         board.initialize_candidates();
-        println!("Candidates: {:?}", board.candidates);
+        // println!("Candidates: {:?}", board.candidates);
     }
 }
 
@@ -661,19 +679,19 @@ impl RuleBasedSolver {
         let mut applied = false;
 
         if self.naked_single(board) {
-            println!("Naked single applied");
+            // println!("Naked single applied");
             applied = true;
         }
         if self.hidden_single(board) {
-            println!("Hidden single applied");
+            // println!("Hidden single applied");
             applied = true;
         }
         if self.naked_pair(board) {
-            println!("Naked pair applied");
+            // println!("Naked pair applied");
             applied = true;
         }
         if self.hidden_pair(board) {
-            println!("Hidden pair applied");
+            // println!("Hidden pair applied");
             applied = true;
         }
         applied
